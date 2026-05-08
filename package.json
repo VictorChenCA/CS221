@@ -1,0 +1,9 @@
+{
+  "name": "cs221-biome-bot",
+  "version": "0.0.1",
+  "private": true,
+  "dependencies": {
+    "mineflayer": "^4.20.0",
+    "mineflayer-pathfinder": "^2.4.5"
+  }
+}
