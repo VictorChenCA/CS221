@@ -11,20 +11,20 @@ npm install
 pip install -r requirements.txt
 ```
 
-Needs a Minecraft 1.20 Java server running locally on the default port.
+Needs a PaperMC 1.20.1 server running locally on `:25565`.
 
 ## running
 
-Start the bridge:
+Spawn bots (one process per bot, ports `9000+id`):
 
 ```
-node bot/bridge.js
+node bot/spawn.js 10
 ```
 
 Then in another shell:
 
 ```
-python eval.py --policy qlearn --seed 12345
+python eval.py --policy qlearn --seed 1111
 ```
 
 Policies: `random`, `frontier`, `qlearn`, `oracle`.
