@@ -4,6 +4,8 @@
   "private": true,
   "dependencies": {
     "mineflayer": "^4.20.0",
-    "mineflayer-pathfinder": "^2.4.5"
+    "mineflayer-pathfinder": "^2.4.5",
+    "minecraft-data": "^3.83.0",
+    "vec3": "^0.1.10"
   }
 }
