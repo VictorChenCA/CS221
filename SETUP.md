@@ -66,11 +66,11 @@ client install is only needed if you want to see what the bot sees.
   - Windows: same in PowerShell, or via a `start.bat`.
 - Should listen on `localhost:25565`.
 
-## 4. Node.js 22 LTS
+## 4. Node.js 20 LTS
 
-- Mac: `brew install node`
-- Windows: install Node 22 LTS MSI from nodejs.org.
-- Verify: `node -v` (≥ 22), `npm -v`.
+- Mac: `brew install node@20` then `brew link --overwrite --force node@20`
+- Windows: install Node 20 LTS MSI from nodejs.org.
+- Verify: `node -v` (20.x), `npm -v`.
 - In repo: `npm install` (pulls `mineflayer`, `mineflayer-pathfinder`,
   `minecraft-data`, `vec3`).
 
