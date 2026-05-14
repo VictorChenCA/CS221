@@ -6,7 +6,7 @@
 
 const net = require('net');
 const mineflayer = require('mineflayer');
-const { pathfinder, Movements, goals: { GoalXZ } } = require('mineflayer-pathfinder');
+const { pathfinder, Movements, goals: { GoalNearXZ } } = require('mineflayer-pathfinder');
 const mcData = require('minecraft-data')('1.20.1');
 
 const ID = parseInt(process.argv[2] || '0', 10);
@@ -50,23 +50,32 @@ function getObs() {
   };
 }
 
+const ACTION_TIMEOUT_MS = 30000;
+
 function executeAction({ theta, distance }, cb) {
   if (!distance) { cb(getObs()); return; }
   const rad = (theta * Math.PI) / 180;
   const p = bot.entity.position;
-  const goal = new GoalXZ(p.x + Math.sin(rad) * distance, p.z + Math.cos(rad) * distance);
-  bot.pathfinder.setGoal(goal, true);
+  const tx = p.x + Math.sin(rad) * distance;
+  const tz = p.z + Math.cos(rad) * distance;
+  const goal = new GoalNearXZ(tx, tz, 3);
+  bot.pathfinder.setGoal(goal, false);
 
-  const onReach = () => {
+  let done = false;
+  const finish = (stuck) => {
+    if (done) return;
+    done = true;
+    clearTimeout(timer);
+    bot.removeListener('goal_reached', onReach);
     bot.removeListener('path_update', onStuck);
-    cb(getObs());
+    bot.pathfinder.setGoal(null);
+    cb(stuck ? { ...getObs(), stuck: true } : getObs());
   };
+  const onReach = () => finish(false);
   const onStuck = (r) => {
-    if (r.status === 'noPath' || r.status === 'timeout') {
-      bot.removeListener('goal_reached', onReach);
-      cb({ ...getObs(), stuck: true });
-    }
+    if (r.status === 'noPath' || r.status === 'timeout') finish(true);
   };
+  const timer = setTimeout(() => finish(true), ACTION_TIMEOUT_MS);
   bot.once('goal_reached', onReach);
   bot.on('path_update', onStuck);
 }
