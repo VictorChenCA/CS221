@@ -51,6 +51,7 @@ function getObs() {
 }
 
 function executeAction({ theta, distance }, cb) {
+  if (!distance) { cb(getObs()); return; }
   const rad = (theta * Math.PI) / 180;
   const p = bot.entity.position;
   const goal = new GoalXZ(p.x + Math.sin(rad) * distance, p.z + Math.cos(rad) * distance);
