@@ -51,18 +51,25 @@ class Env:
         self.sock.sendall((json.dumps(
             {"theta": theta_deg, "distance": distance_blocks}) + "\n").encode())
         obs = self._read_line()
-        # bot.entity can be momentarily null (bot kicked/respawning); the
-        # bridge encodes NaN coords as JSON null. Build an all-unknown
-        # grid in that case so downstream policies (which always read
-        # obs["grid"]) don't KeyError.
+        # Two reasons env owns the world overlay rather than the bridge:
+        # 1) bot.entity can be momentarily null (bot kicked/respawning);
+        #    the bridge encodes NaN coords as JSON null.
+        # 2) mineflayer's bot.world.getBiome() doesn't agree with Paper's
+        #    1.20.1 biome registry (it returns 0 everywhere), so the
+        #    bridge's biomeId field is unusable. We override it with the
+        #    cubiomes-derived id from the WorldView, which is the source
+        #    of truth for the whole "complete knowledge" pipeline.
         if self.world_view is not None:
             size = 2 * self.grid_radius + 1
             if obs.get("cellX") is not None and obs.get("cellZ") is not None:
                 grid = self.world_view.get_grid(
                     obs["cellX"], obs["cellZ"], self.grid_radius)
                 obs["grid"] = grid.flatten().tolist()
+                obs["biomeId"] = self.world_view.biome_at(
+                    obs["cellX"], obs["cellZ"])
             else:
                 obs["grid"] = [-1] * (size * size)
+                # leave biomeId as whatever bridge sent; eval skips < 0
             obs["gridRadius"] = self.grid_radius
         return obs
 
