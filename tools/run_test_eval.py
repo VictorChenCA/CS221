@@ -27,7 +27,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SEEDS = [123, 456, 789]
-POLICIES = ["random", "frontier", "oracle"]
+POLICIES = ["random", "frontier"]
 BOTS_PER_SERVER = 5
 BUDGET_S = 600
 BASE_MC_PORT = 25565
@@ -66,12 +66,14 @@ def offline_uuid(name: str) -> str:
     return f"{s[0:8]}-{s[8:12]}-{s[12:16]}-{s[16:20]}-{s[20:]}"
 
 
+EXTRA_OPS = ["Raz0rMC"]  # human accounts (offline-mode UUIDs)
+
+
 def write_ops_json(dst: Path, n_bots_total: int) -> None:
-    ops = [{"uuid": offline_uuid(f"Explorer_{i}"),
-            "name": f"Explorer_{i}",
-            "level": 4,
+    names = [f"Explorer_{i}" for i in range(n_bots_total)] + EXTRA_OPS
+    ops = [{"uuid": offline_uuid(n), "name": n, "level": 4,
             "bypassesPlayerLimit": False}
-           for i in range(n_bots_total)]
+           for n in names]
     (dst / "ops.json").write_text(json.dumps(ops, indent=2))
 
 
@@ -136,7 +138,7 @@ def main() -> None:
     for seed, _, d in servers:
         log = LOGS / f"server_{seed}.log"
         print(f"[server] booting {d.name}")
-        spawn(["java", "-Xmx3G", "-Xms1G", "-jar", "paper.jar", "nogui"],
+        spawn(["java", "-Xmx4G", "-Xms1G", "-jar", "paper.jar", "nogui"],
               log, cwd=d)
     for seed, _, _ in servers:
         wait_for_done(LOGS / f"server_{seed}.log", f"server {seed}")
