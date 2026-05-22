@@ -29,3 +29,4 @@ mc-server/ops.json
 mc-server/whitelist.json
 mc-server/usercache.json
 mc-server/.console_history
+results/
