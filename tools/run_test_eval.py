@@ -14,6 +14,8 @@ Usage:
 """
 
 import atexit
+import hashlib
+import json
 import os
 import re
 import shutil
@@ -29,7 +31,7 @@ POLICIES = ["random", "frontier", "oracle"]
 BOTS_PER_SERVER = 5
 BUDGET_S = 600
 BASE_MC_PORT = 25565
-SETTLE_S = 10
+SETTLE_S = 15
 SERVER_READY_TIMEOUT_S = 180
 
 LOGS = ROOT / "logs"
@@ -53,7 +55,27 @@ for sig in (signal.SIGINT, signal.SIGTERM):
     signal.signal(sig, lambda *_: sys.exit(130))
 
 
-def stage_server_dir(seed: int, port: int) -> Path:
+def offline_uuid(name: str) -> str:
+    """Java's UUID.nameUUIDFromBytes("OfflinePlayer:<name>") = the UUID
+    Paper's offline mode assigns. Used so ops.json matches the bots
+    that connect."""
+    h = bytearray(hashlib.md5(f"OfflinePlayer:{name}".encode()).digest())
+    h[6] = (h[6] & 0x0F) | 0x30  # UUID v3
+    h[8] = (h[8] & 0x3F) | 0x80  # variant
+    s = h.hex()
+    return f"{s[0:8]}-{s[8:12]}-{s[12:16]}-{s[16:20]}-{s[20:]}"
+
+
+def write_ops_json(dst: Path, n_bots_total: int) -> None:
+    ops = [{"uuid": offline_uuid(f"Explorer_{i}"),
+            "name": f"Explorer_{i}",
+            "level": 4,
+            "bypassesPlayerLimit": False}
+           for i in range(n_bots_total)]
+    (dst / "ops.json").write_text(json.dumps(ops, indent=2))
+
+
+def stage_server_dir(seed: int, port: int, n_bots_total: int) -> Path:
     src = ROOT / "mc-server"
     dst = ROOT / f"mc-server-test{seed}"
     if not dst.exists():
@@ -73,6 +95,8 @@ def stage_server_dir(seed: int, port: int) -> Path:
         text = re.sub(r"^level-seed=.*$", f"level-seed={seed}", text, flags=re.M)
         text = re.sub(r"^server-port=.*$", f"server-port={port}", text, flags=re.M)
         props.write_text(text)
+    # Always rewrite ops.json — needs all bot UUIDs so they can /tp.
+    write_ops_json(dst, n_bots_total)
     return dst
 
 
@@ -102,10 +126,11 @@ def main() -> None:
             sys.exit(f"missing data/biomes_{s}.npz — run "
                      f"`python3 tools/extract_biomes.py --seed {s}` first")
 
+    n_bots_total = len(SEEDS) * BOTS_PER_SERVER
     servers = []
     for i, seed in enumerate(SEEDS):
         port = BASE_MC_PORT + i
-        d = stage_server_dir(seed, port)
+        d = stage_server_dir(seed, port, n_bots_total)
         servers.append((seed, port, d))
 
     for seed, _, d in servers:
@@ -122,10 +147,13 @@ def main() -> None:
             bot_id = s_idx * BOTS_PER_SERVER + b
             env = os.environ.copy()
             env["MC_PORT"] = str(port)
+            env["DISPERSE_N"] = str(BOTS_PER_SERVER)
             spawn(["node", "bot/bridge.js", str(bot_id)],
                   LOGS / f"bot_{bot_id}.log", env=env, cwd=ROOT)
             n_bots += 1
             time.sleep(0.5)
+    # Each bot takes SPAWN_CHUNK_WAIT_MS + DISPERSE_WAIT_MS (=5s) plus
+    # connect time before it can take an action; pad to 15s to be safe.
     print(f"[bots] {n_bots} bridges spawning; settling {SETTLE_S} s")
     time.sleep(SETTLE_S)
 

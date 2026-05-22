@@ -51,7 +51,10 @@ class Env:
         self.sock.sendall((json.dumps(
             {"theta": theta_deg, "distance": distance_blocks}) + "\n").encode())
         obs = self._read_line()
-        if self.world_view is not None:
+        # bot.entity can be momentarily null (bot kicked/respawning); the
+        # bridge encodes NaN coords as JSON null. Skip the view overlay
+        # for that obs so the episode loop keeps running.
+        if self.world_view is not None and obs.get("cellX") is not None and obs.get("cellZ") is not None:
             grid = self.world_view.get_grid(obs["cellX"], obs["cellZ"], self.grid_radius)
             obs["grid"] = grid.flatten().tolist()
             obs["gridRadius"] = self.grid_radius

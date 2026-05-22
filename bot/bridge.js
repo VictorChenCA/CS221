@@ -23,6 +23,12 @@ const PORT = parseInt(process.env.MC_PORT || '25565', 10);
 const BRIDGE_PORT = 9000 + ID;
 const GRID_RADIUS = parseInt(process.env.GRID_RADIUS || '8', 10);  // cells (1 cell = 4 blocks)
 const SPAWN_CHUNK_WAIT_MS = 2000;  // let initial chunk stream settle before serving the first obs
+// Proposal §6: spawn bots on a circle so they don't pathfinder-collide
+// at (0,0). DISPERSE_R = circle radius in blocks; DISPERSE_N = how many
+// bots are spread around this server (used for the angle).
+const DISPERSE_R = parseInt(process.env.DISPERSE_R || '500', 10);
+const DISPERSE_N = parseInt(process.env.DISPERSE_N || '5', 10);
+const DISPERSE_WAIT_MS = 3000;  // give the /tp packet + new chunks time to settle
 // 'complete' = Python overlays the grid from a pre-extracted seed dump,
 // so we skip live sampling here. 'los' = bridge ships its loaded-chunk
 // grid (with the visible() filter) for the line-of-sight setting.
@@ -45,11 +51,21 @@ bot.visitedBiomes = new Set();
 
 bot.once('spawn', () => {
   bot.pathfinder.setMovements(new Movements(bot));
-  console.log(`bot ${ID} spawned, waiting ${SPAWN_CHUNK_WAIT_MS}ms for chunk stream`);
+  // Disperse on a DISPERSE_R-block circle (proposal §6). The /tp
+  // command needs op — see tools/run_test_eval.py which writes ops.json.
+  const localId = ID % DISPERSE_N;
+  const angle = (localId / DISPERSE_N) * 2 * Math.PI;
+  const tx = Math.round(Math.cos(angle) * DISPERSE_R);
+  const tz = Math.round(Math.sin(angle) * DISPERSE_R);
+  console.log(`bot ${ID} spawned, dispersing to (${tx}, ${tz})`);
+  bot.chat(`/tp ${tx} 100 ${tz}`);
   setTimeout(() => {
-    console.log(`bot ${ID} ready`);
+    console.log(`bot ${ID} ready at`,
+      bot.entity && bot.entity.position
+        ? `(${bot.entity.position.x.toFixed(0)}, ${bot.entity.position.z.toFixed(0)})`
+        : '(no position?)');
     startServer();
-  }, SPAWN_CHUNK_WAIT_MS);
+  }, SPAWN_CHUNK_WAIT_MS + DISPERSE_WAIT_MS);
 });
 
 bot.on('error', (e) => console.error(`bot ${ID} error:`, e.message));
