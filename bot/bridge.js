@@ -26,7 +26,9 @@ const SPAWN_CHUNK_WAIT_MS = 2000;  // let initial chunk stream settle before ser
 // Proposal §6: spawn bots on a circle so they don't pathfinder-collide
 // at (0,0). DISPERSE_R = circle radius in blocks; DISPERSE_N = how many
 // bots are spread around this server (used for the angle).
-const DISPERSE_R = parseInt(process.env.DISPERSE_R || '500', 10);
+// 250 blocks ≈ 16 chunks; inside the server's 24-chunk view distance
+// from spawn, so chunks at the tp destination are already loaded.
+const DISPERSE_R = parseInt(process.env.DISPERSE_R || '250', 10);
 const DISPERSE_N = parseInt(process.env.DISPERSE_N || '5', 10);
 const DISPERSE_WAIT_MS = 3000;  // give the /tp packet + new chunks time to settle
 // 'complete' = Python overlays the grid from a pre-extracted seed dump,
@@ -58,7 +60,9 @@ bot.once('spawn', () => {
   const tx = Math.round(Math.cos(angle) * DISPERSE_R);
   const tz = Math.round(Math.sin(angle) * DISPERSE_R);
   console.log(`bot ${ID} spawned, dispersing to (${tx}, ${tz})`);
-  bot.chat(`/tp ${tx} 100 ${tz}`);
+  // Y=250 well above any terrain; bot falls to surface (requires
+  // server.properties allow-flight=true so the airborne phase isn't kicked).
+  bot.chat(`/tp ${tx} 250 ${tz}`);
   setTimeout(() => {
     console.log(`bot ${ID} ready at`,
       bot.entity && bot.entity.position
