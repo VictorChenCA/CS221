@@ -114,6 +114,19 @@ python3 eval.py --policy frontier --seed 1111 --episode 1
 python3 eval.py --policy oracle   --seed 1111 --episode 2 --radius 64
 ```
 
+### Full test-eval (45 episodes, ~30 min, cross-platform)
+
+```bash
+for s in 123 456 789; do python3 tools/extract_biomes.py --seed $s; done
+python3 tools/run_test_eval.py
+```
+
+Stages one Paper server per test seed (ports 25565..25567), spawns 5
+bot bridges per server, then runs random → frontier → oracle across all
+15 bots in parallel. Wall-clock ≈ one episode budget (10 min) per
+policy. Cleans up servers + bots on exit / Ctrl-C. Works on macOS,
+Linux, Windows.
+
 Per-episode metrics land in `results/<policy>_<seed>_<ep>.json` (primary:
 `unique_biomes`; plus `biomes_per_action`, `position_entropy`,
 `position_coverage`, `biome_entropy`). See proposal §3.
