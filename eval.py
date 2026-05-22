@@ -56,7 +56,7 @@ def run_policy_episode(env: Env, policy, budget_s: float) -> list[dict]:
 def run_oracle_episode(env: Env, seed: int, radius_cells: int,
                        budget_s: float) -> list[dict]:
     """Plan offline from start_cell, replay hops through the bridge."""
-    import oracle  # local: keep numpy out of the policy path
+    from mdp import oracle  # local: keep numpy out of the policy path
     warmup = env.step(0)
     start_cell = (warmup["cellX"], warmup["cellZ"])
     plan = oracle.plan(seed=seed, start_cell=start_cell,

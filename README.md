@@ -139,7 +139,7 @@ python3 -m pytest tests/
 Smoke-test locomotion end-to-end (requires server + at least one bot):
 
 ```bash
-python3 tools/test_locomotion.py --id 0
+python3 tools/smoke_locomotion.py --id 0
 ```
 
 ## Layout
@@ -152,11 +152,13 @@ mdp/                   Python: env, world view, biome generator, policies
   baselines.py         RandomPolicy, FrontierPolicy
   features.py          (TODO §C — linear-Q feature extractor)
   qlearn.py            (TODO §C — Q-learning + count-based bonus)
+  oracle.py            Offline greedy orienteering planner
 bot/                   Node: mineflayer bridge + spawner
 tools/                 Utility scripts; tools/cubiomes/ vendored, gitignored
+  extract_biomes.py    Materializer: cubiomes → data/biomes_<seed>.npz
+  smoke_locomotion.py  Interactive smoke test (not pytest)
 tests/                 pytest
 mc-server/             PaperMC install; world data gitignored
-oracle.py              Offline greedy orienteering planner
 eval.py                One-episode orchestrator
 seeds.txt              Train (10) / test (3) seed split
 ```
