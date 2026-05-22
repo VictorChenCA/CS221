@@ -46,7 +46,7 @@ def cubiomes_gen(seed: int) -> Callable[[int, int], int]:
     if not CUBIOMES_LIB.exists():
         raise FileNotFoundError(
             f"cubiomes shared lib missing at {CUBIOMES_LIB}. "
-            f"See agent/biomegen.py docstring for build steps."
+            f"See mdp/biomegen.py docstring for build steps."
         )
     lib = ctypes.CDLL(str(CUBIOMES_LIB))
 

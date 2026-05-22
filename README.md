@@ -27,27 +27,17 @@ Two world settings, per proposal §2:
 
 ## Setup (one-time)
 
-### 1. Java + PaperMC server
+### 1. Java
 
 ```bash
 brew install --cask temurin              # macOS; or Adoptium Temurin 21 on Windows
 java -version                            # expect 21.x
 ```
 
-Drop `paper-1.20.1-<build>.jar` from papermc.io/downloads into
-`mc-server/paper.jar`. First run will fail on EULA — edit `eula.txt`
-to `eula=true`. Then in `mc-server/server.properties`:
-
-```
-online-mode=false
-max-players=15
-level-seed=1111            # change per experiment; requires restart
-gamemode=adventure
-difficulty=peaceful
-view-distance=24
-simulation-distance=10
-spawn-protection=0
-```
+`mc-server/` ships pre-configured (paper.jar, eula.txt, server.properties,
+all Paper YAMLs). The only field you change per experiment is
+`level-seed=<N>` in `mc-server/server.properties` — Paper reads it once at
+world creation, so changing it requires a server restart.
 
 ### 2. Node deps
 
