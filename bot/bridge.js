@@ -52,7 +52,11 @@ bot.loadPlugin(pathfinder);
 bot.visitedBiomes = new Set();
 
 bot.once('spawn', () => {
-  bot.pathfinder.setMovements(new Movements(bot));
+  // canDig=true lets the bot break leaves/wood to escape canopy if it
+  // lands on a tree after the Y=250 disperse fall.
+  const moves = new Movements(bot);
+  moves.canDig = true;
+  bot.pathfinder.setMovements(moves);
   // Disperse on a DISPERSE_R-block circle (proposal §6). The /tp
   // command needs op — see tools/run_test_eval.py which writes ops.json.
   const localId = ID % DISPERSE_N;
@@ -60,6 +64,9 @@ bot.once('spawn', () => {
   const tx = Math.round(Math.cos(angle) * DISPERSE_R);
   const tz = Math.round(Math.sin(angle) * DISPERSE_R);
   console.log(`bot ${ID} spawned, dispersing to (${tx}, ${tz})`);
+  // Disable fall damage so the bot survives the 180-block plunge from
+  // Y=250. Idempotent; harmless if a peer bot already set it.
+  bot.chat('/gamerule fallDamage false');
   // Y=250 above any terrain; bot falls to surface (needs
   // allow-flight=true to tolerate the brief airborne phase).
   bot.chat(`/tp ${tx} 250 ${tz}`);
@@ -148,26 +155,41 @@ function executeAction({ theta, distance }, cb) {
   if (!distance) { cb(getObs()); return; }
   const rad = (theta * Math.PI) / 180;
   const p = bot.entity.position;
+  const sx = Math.floor(p.x), sy = Math.floor(p.y), sz = Math.floor(p.z);
   const tx = p.x + Math.sin(rad) * distance;
   const tz = p.z + Math.cos(rad) * distance;
+  const startBiomeId = bot.world.getBiome(sx, sy, sz);
+  const startBiome = mcData.biomes[startBiomeId]?.name ?? 'unknown';
+  const t0 = Date.now();
   const goal = new GoalNearXZ(tx, tz, 3);
   bot.pathfinder.setGoal(goal, false);
 
   let done = false;
-  const finish = (stuck) => {
+  const finish = (stuck, reason) => {
     if (done) return;
     done = true;
     clearTimeout(timer);
     bot.removeListener('goal_reached', onReach);
     bot.removeListener('path_update', onStuck);
     bot.pathfinder.setGoal(null);
-    cb(stuck ? { ...getObs(), stuck: true } : getObs());
+    const obs = stuck ? { ...getObs(), stuck: true } : getObs();
+    const moved = Math.hypot(obs.x - sx, obs.z - sz);
+    const dt = ((Date.now() - t0) / 1000).toFixed(1);
+    // Single-line, grep-able per-move trace in block coordinates.
+    console.log(
+      `[move bot=${ID}] theta=${theta.toFixed(0)} d=${distance} ` +
+      `start=(${sx},${sy},${sz}) startBiome=${startBiome} ` +
+      `target=(${Math.round(tx)},${Math.round(tz)}) ` +
+      `end=(${obs.x},${obs.z}) endBiome=${obs.biomeName} ` +
+      `moved=${moved.toFixed(1)} dt=${dt}s ` +
+      `result=${stuck ? `STUCK:${reason}` : 'OK'}`);
+    cb(obs);
   };
-  const onReach = () => finish(false);
+  const onReach = () => finish(false, 'reached');
   const onStuck = (r) => {
-    if (r.status === 'noPath' || r.status === 'timeout') finish(true);
+    if (r.status === 'noPath' || r.status === 'timeout') finish(true, r.status);
   };
-  const timer = setTimeout(() => finish(true), ACTION_TIMEOUT_MS);
+  const timer = setTimeout(() => finish(true, 'action-timeout'), ACTION_TIMEOUT_MS);
   bot.once('goal_reached', onReach);
   bot.on('path_update', onStuck);
 }
