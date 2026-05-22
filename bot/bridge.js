@@ -60,10 +60,15 @@ bot.once('spawn', () => {
   const tx = Math.round(Math.cos(angle) * DISPERSE_R);
   const tz = Math.round(Math.sin(angle) * DISPERSE_R);
   console.log(`bot ${ID} spawned, dispersing to (${tx}, ${tz})`);
-  // Y=250 well above any terrain; bot falls to surface (requires
-  // server.properties allow-flight=true so the airborne phase isn't kicked).
+  // Freeze mineflayer's client physics across the /tp so it doesn't
+  // ship a stale position the NMS validator rejects as "Invalid move
+  // player packet". Re-enabled after the server confirms the teleport.
+  bot.physicsEnabled = false;
+  // Y=250 is above any terrain; bot falls to surface once physics
+  // resumes (needs allow-flight=true to tolerate the brief airborne phase).
   bot.chat(`/tp ${tx} 250 ${tz}`);
   setTimeout(() => {
+    bot.physicsEnabled = true;
     console.log(`bot ${ID} ready at`,
       bot.entity && bot.entity.position
         ? `(${bot.entity.position.x.toFixed(0)}, ${bot.entity.position.z.toFixed(0)})`
