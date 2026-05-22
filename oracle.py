@@ -1,41 +1,51 @@
 """Offline max-coverage oracle (proposal §6 upper bound).
 
 The oracle is *not* a Policy — it doesn't see observations one at a
-time. Given a seed and a time budget, it computes the full biome map
+time. Given a seed and a time budget, it loads the full biome map
 inside a fixed search radius and plans a route that visits as many
 distinct biomes as possible under the budget. `eval.py` then replays
 the planned action sequence through the same bridge the learned
 policies use.
 
-Approach (greedy orienteering / set-cover):
-  1. Look up `biome_at(x, z)` for every cell in a (2R+1)x(2R+1) window
-     around `start`. R is in 4-block cells, matching the agent's MDP.
-  2. For each distinct biome, take the *nearest* representative cell
-     to the current position as its target.
-  3. Greedy loop until budget exhausted:
-       - of the unvisited biomes, pick the one whose target is
-         cheapest to reach from the current position;
-       - append that hop; advance position; mark biome visited.
-  4. Convert the resulting waypoint sequence to (theta, distance) hops
-     matching the bridge's action contract.
+Algorithm (greedy orienteering / set-cover):
+  1. Scan biome_at over the (2R+1)x(2R+1) cell window around start.
+  2. Group cells by biome id; for each biome (other than the starting
+     one) keep the cell nearest to start — that's the candidate target.
+  3. Greedy loop: from the current position, pick the unvisited biome
+     whose target is cheapest to reach. Append the hop, update position,
+     mark visited. Stop when no remaining hop fits in the budget.
+  4. Snap each (dx, dz) vector to the bridge's 8-way compass action.
 
-This is the standard greedy set-cover approximation for orienteering;
-it doesn't hit the true optimum but gets us a strong upper bound
-that's tractable for ~10-min budgets and the radii we care about.
+This is a 1-(1/e) approximation to weighted orienteering when the
+"reward" is uniform set coverage, which is the case here. Tractable for
+10-minute budgets at the radii we use.
 
-NOTE: scaffold — `biome_at` is injected so we can swap in cubiomes
-later without changing this file. See `_BiomeSource` below.
+Biome data comes from `NpzBiomeSource(seed)`, which reads a pre-extracted
+biome dump from `data/biomes_<seed>.npz`. Generate that file once per
+seed using a cubiomes binding (preferred — no server needed) or by
+harvesting `mc-server/world/region/*.mca` with anvil-parser. See
+`tools/extract_biomes.py` (TODO).
 """
 
+import math
 from dataclasses import dataclass
-from typing import Callable, Iterable
+from pathlib import Path
+from typing import Callable
 
-# Match the bridge's locomotion contract (8-way compass, hop = blocks).
-NUM_ACTIONS = 8
-CELL_BLOCKS = 4  # Minecraft 1.18+ biome cell size
+import numpy as np
+
+from agent.env import NUM_ACTIONS
+
+CELL_BLOCKS = 4  # Minecraft 1.18+ biome cell size in blocks
+
+# Empirical pathfinder speed under sprint+jump. Re-measure once the
+# bridge is profiled; conservative estimate for budgeting.
+WALK_SPEED_BPS = 4.3
+
+DATA_DIR = Path(__file__).parent / "data"
 
 
-BiomeFn = Callable[[int, int], int]  # (cellX, cellZ) -> biome id
+BiomeFn = Callable[[int, int], int]  # (cellX, cellZ) -> biome id (or -1 = unknown)
 
 
 @dataclass
@@ -47,25 +57,39 @@ class Hop:
 @dataclass
 class Plan:
     hops: list[Hop]
-    expected_biomes: list[int]  # biomes visited in order, including start
+    expected_biomes: list[int]  # in visit order, including the starting biome
 
 
-class _BiomeSource:
-    """Stub biome source. Replace with cubiomes binding.
+class NpzBiomeSource:
+    """Load a pre-extracted biome map dump from disk.
 
-    Real implementation will be something like:
-        cubiomes.set_seed(seed)
-        return cubiomes.get_biome(cell_x * 4, y, cell_z * 4)
-    For now this raises so callers don't silently get garbage.
+    File format (numpy savez_compressed):
+      - biomes:      int16 array, shape (H, W)
+      - origin_cell: int32 array [cellX0, cellZ0] of biomes[0, 0]
+
+    Out-of-window cells return -1, the same sentinel the bridge uses
+    for unknown cells. Generate dumps with tools/extract_biomes.py.
     """
 
-    def __init__(self, seed: int):
-        self.seed = seed
+    def __init__(self, seed: int, data_dir: Path = DATA_DIR):
+        path = data_dir / f"biomes_{seed}.npz"
+        if not path.exists():
+            raise FileNotFoundError(
+                f"no biome dump at {path}. Run "
+                f"`python tools/extract_biomes.py --seed {seed}` first."
+            )
+        z = np.load(path)
+        self.biomes = z["biomes"]
+        self.origin_cell = tuple(int(v) for v in z["origin_cell"])
 
     def __call__(self, cell_x: int, cell_z: int) -> int:
-        raise NotImplementedError(
-            "biome_at — wire up cubiomes (see oracle.py docstring)"
-        )
+        ox, oz = self.origin_cell
+        i = cell_z - oz
+        j = cell_x - ox
+        h, w = self.biomes.shape
+        if not (0 <= i < h and 0 <= j < w):
+            return -1
+        return int(self.biomes[i, j])
 
 
 def plan(
@@ -75,30 +99,64 @@ def plan(
     time_budget_s: float,
     biome_at: BiomeFn | None = None,
 ) -> Plan:
-    """Compute an oracle plan. See module docstring for the algorithm.
-
-    `biome_at` defaults to the cubiomes-backed `_BiomeSource(seed)`;
-    tests can pass a dict-backed fake.
-    """
+    """Greedy orienteering plan. See module docstring for the algorithm."""
     if biome_at is None:
-        biome_at = _BiomeSource(seed)
+        biome_at = NpzBiomeSource(seed)
 
-    # TODO(Victor):
-    #   1. scan the (2R+1)^2 window, build biome -> [cells] index
-    #   2. for each biome, keep only the nearest cell to start
-    #   3. greedy loop under `time_budget_s` (use a walk-speed constant
-    #      to convert distance -> seconds; ~4.3 blocks/s for sprinting)
-    #   4. emit Hops in compass-snapped form (match agent/env.py)
-    raise NotImplementedError("oracle.plan — TODO")
+    sx, sz = start_cell
+
+    # Step 1: scan the window, group cells by biome.
+    biome_cells: dict[int, list[tuple[int, int]]] = {}
+    for dz in range(-radius_cells, radius_cells + 1):
+        for dx in range(-radius_cells, radius_cells + 1):
+            cx, cz = sx + dx, sz + dz
+            b = biome_at(cx, cz)
+            if b < 0:
+                continue
+            biome_cells.setdefault(b, []).append((cx, cz))
+
+    start_biome = biome_at(sx, sz)
+
+    # Step 2: collapse each biome to its closest representative cell.
+    targets: dict[int, tuple[int, int]] = {}
+    for b, cells in biome_cells.items():
+        if b == start_biome:
+            continue
+        targets[b] = min(cells, key=lambda c: _block_dist(start_cell, c))
+
+    # Step 3: greedy hop loop under the time budget.
+    hops: list[Hop] = []
+    visited: list[int] = [start_biome] if start_biome >= 0 else []
+    cur = (sx, sz)
+    time_used = 0.0
+
+    while targets:
+        b, tgt = min(targets.items(), key=lambda kv: _block_dist(cur, kv[1]))
+        dist_blocks = _block_dist(cur, tgt)
+        travel_s = dist_blocks / WALK_SPEED_BPS
+        if time_used + travel_s > time_budget_s:
+            break
+        dx_b = (tgt[0] - cur[0]) * CELL_BLOCKS
+        dz_b = (tgt[1] - cur[1]) * CELL_BLOCKS
+        hops.append(_snap_to_compass(dx_b, dz_b))
+        visited.append(b)
+        cur = tgt
+        time_used += travel_s
+        del targets[b]
+
+    return Plan(hops=hops, expected_biomes=visited)
+
+
+def _block_dist(a: tuple[int, int], b: tuple[int, int]) -> float:
+    return math.hypot((a[0] - b[0]) * CELL_BLOCKS, (a[1] - b[1]) * CELL_BLOCKS)
 
 
 def _snap_to_compass(dx: float, dz: float) -> Hop:
-    """Convert a free vector (in blocks) to the nearest 8-way compass hop.
+    """Convert a free (dx, dz) vector in blocks to the nearest 8-way hop.
 
-    Kept here because the oracle's plan must replay through the same
-    discrete action space as the learned policies.
+    The bridge accepts (theta_deg, distance_blocks); theta is measured
+    clockwise from +z (north), matching `agent/env.py::action_to_theta`.
     """
-    import math
     distance = int(round(math.hypot(dx, dz)))
     theta = (math.degrees(math.atan2(dx, dz)) + 360.0) % 360.0
     step = 360.0 / NUM_ACTIONS
@@ -106,7 +164,3 @@ def _snap_to_compass(dx: float, dz: float) -> Hop:
     return Hop(theta_deg=theta_snapped, distance_blocks=distance)
 
 
-def replay(plan: Plan) -> Iterable[dict]:
-    """Yield bridge action dicts for `eval.py` to send over the socket."""
-    for hop in plan.hops:
-        yield {"theta": hop.theta_deg, "distance": hop.distance_blocks}
