@@ -31,7 +31,7 @@ POLICIES = ["random", "frontier", "oracle"]
 BOTS_PER_SERVER = 5
 BUDGET_S = 600
 BASE_MC_PORT = 25565
-SETTLE_S = 25
+SETTLE_S = 35
 SERVER_READY_TIMEOUT_S = 180
 
 LOGS = ROOT / "logs"

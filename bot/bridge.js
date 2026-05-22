@@ -30,7 +30,7 @@ const SPAWN_CHUNK_WAIT_MS = 2000;  // let initial chunk stream settle before ser
 // from spawn, so chunks at the tp destination are already loaded.
 const DISPERSE_R = parseInt(process.env.DISPERSE_R || '250', 10);
 const DISPERSE_N = parseInt(process.env.DISPERSE_N || '5', 10);
-const LAND_WAIT_MS = 8000;  // time to fall from Y=250 + load destination chunks
+const LAND_TIMEOUT_MS = 20000;  // give the bot at most this long to land after /tp
 // 'complete' = Python overlays the grid from a pre-extracted seed dump,
 // so we skip live sampling here. 'los' = bridge ships its loaded-chunk
 // grid (with the visible() filter) for the line-of-sight setting.
@@ -60,19 +60,27 @@ bot.once('spawn', () => {
   const tx = Math.round(Math.cos(angle) * DISPERSE_R);
   const tz = Math.round(Math.sin(angle) * DISPERSE_R);
   console.log(`bot ${ID} spawned, dispersing to (${tx}, ${tz})`);
-  // Y=250 is above any terrain; bot falls to surface (needs
+  // Y=250 above any terrain; bot falls to surface (needs
   // allow-flight=true to tolerate the brief airborne phase).
   bot.chat(`/tp ${tx} 250 ${tz}`);
-  // Wait for the server's forced teleport to arrive (forcedMove event),
-  // then give the bot LAND_WAIT_MS to fall and chunks to load before
-  // opening the agent socket.
+  // Wait for the forced teleport, then poll until the bot is actually
+  // on the ground before opening the bridge — pathfinder commanding a
+  // mid-air bot produces "Invalid move player packet" kicks.
   bot.once('forcedMove', () => {
-    setTimeout(() => {
-      const p = bot.entity && bot.entity.position;
-      console.log(`bot ${ID} ready at`,
-        p ? `(${p.x.toFixed(0)}, ${p.y.toFixed(0)}, ${p.z.toFixed(0)})` : '(no position?)');
-      startServer();
-    }, LAND_WAIT_MS);
+    const deadline = Date.now() + LAND_TIMEOUT_MS;
+    const waitLanded = () => {
+      if (bot.entity && bot.entity.onGround) {
+        const p = bot.entity.position;
+        console.log(`bot ${ID} landed at (${p.x.toFixed(0)}, ${p.y.toFixed(0)}, ${p.z.toFixed(0)})`);
+        startServer();
+      } else if (Date.now() >= deadline) {
+        console.log(`bot ${ID} land timeout; opening bridge anyway`);
+        startServer();
+      } else {
+        setTimeout(waitLanded, 250);
+      }
+    };
+    setTimeout(waitLanded, 500);  // grace period after forcedMove
   });
 });
 
