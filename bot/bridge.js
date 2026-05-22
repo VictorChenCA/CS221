@@ -19,7 +19,8 @@ const ID = parseInt(process.argv[2] || '0', 10);
 const HOST = process.env.MC_HOST || 'localhost';
 const PORT = parseInt(process.env.MC_PORT || '25565', 10);
 const BRIDGE_PORT = 9000 + ID;
-const GRID_RADIUS = parseInt(process.env.GRID_RADIUS || '32', 10);  // cells
+const GRID_RADIUS = parseInt(process.env.GRID_RADIUS || '8', 10);  // cells (1 cell = 4 blocks)
+const SPAWN_CHUNK_WAIT_MS = 2000;  // let initial chunk stream settle before serving the first obs
 
 // Visibility predicate — always-true under complete-knowledge.
 // Swap this out for raycasting / heightmap checks to get line-of-sight.
@@ -38,8 +39,11 @@ bot.visitedBiomes = new Set();
 
 bot.once('spawn', () => {
   bot.pathfinder.setMovements(new Movements(bot));
-  console.log(`bot ${ID} spawned`);
-  startServer();
+  console.log(`bot ${ID} spawned, waiting ${SPAWN_CHUNK_WAIT_MS}ms for chunk stream`);
+  setTimeout(() => {
+    console.log(`bot ${ID} ready`);
+    startServer();
+  }, SPAWN_CHUNK_WAIT_MS);
 });
 
 bot.on('error', (e) => console.error(`bot ${ID} error:`, e.message));
@@ -60,9 +64,15 @@ function sampleGrid(r) {
     for (let dx = -r; dx <= r; dx++) {
       const bx = (cellX + dx) * 4 + 2;  // sample at cell center
       const bz = (cellZ + dz) * 4 + 2;
-      grid[(dz + r) * size + (dx + r)] = visible(bx, bz)
-        ? bot.world.getBiome(bx, y, bz)
-        : -1;
+      if (!visible(bx, bz)) {
+        grid[(dz + r) * size + (dx + r)] = -1;
+        continue;
+      }
+      const b = bot.world.getBiome(bx, y, bz);
+      // Overworld generation never produces the_void (id 0); a 0 read
+      // means the chunk hasn't streamed in yet. Surface that as "unknown"
+      // through the same -1 channel reserved for line-of-sight.
+      grid[(dz + r) * size + (dx + r)] = b === 0 ? -1 : b;
     }
   }
   return { cellX, cellZ, grid };
