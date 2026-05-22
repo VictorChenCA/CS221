@@ -31,3 +31,4 @@ mc-server/usercache.json
 mc-server/.console_history
 results/
 tools/cubiomes/
+mc-server-test*/
