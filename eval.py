@@ -77,7 +77,9 @@ def compute_metrics(trail: list[dict]) -> dict:
         if b is not None and b >= 0:
             visited_biomes.add(b)
             biome_step_counts[b] += 1
-        x, z = obs["x"], obs["z"]
+        x, z = obs.get("x"), obs.get("z")
+        if x is None or z is None:
+            continue  # bot disconnected; bridge shipped null coords
         pos_cells[(x // POS_GRID_BLOCKS, z // POS_GRID_BLOCKS)] += 1
 
     n_actions = max(len(trail) - 1, 1)

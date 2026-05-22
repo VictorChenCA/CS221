@@ -7,6 +7,7 @@ policy instance, so `eval.py` can just call `policy.act(obs)` in a
 loop.
 """
 
+import math
 import random
 from typing import Protocol
 
