@@ -10,7 +10,7 @@ loop.
 import random
 from typing import Protocol
 
-from agent.env import NUM_ACTIONS
+from mdp.env import NUM_ACTIONS
 
 
 class Policy(Protocol):

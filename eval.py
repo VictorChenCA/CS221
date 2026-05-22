@@ -24,9 +24,9 @@ import time
 from collections import Counter
 from pathlib import Path
 
-from agent.env import Env
-from agent.baselines import RandomPolicy, FrontierPolicy
-from agent.world import NpzWorldView
+from mdp.env import Env
+from mdp.baselines import RandomPolicy, FrontierPolicy
+from mdp.world import NpzWorldView
 
 RESULTS_DIR = Path(__file__).parent / "results"
 DEFAULT_BUDGET_S = 600.0     # 10 minutes, proposal §2

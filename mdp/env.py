@@ -17,7 +17,7 @@ bridge's grid is forwarded as-is.
 import json
 import socket
 
-from agent.world import WorldView
+from mdp.world import NpzWorldView
 
 NUM_ACTIONS = 8
 DEFAULT_DISTANCE = 100
@@ -33,7 +33,7 @@ def action_to_theta(action: int) -> float:
 class Env:
     def __init__(self, host: str = "localhost", port: int = 9000,
                  distance: int = DEFAULT_DISTANCE, timeout: float = 120.0,
-                 world_view: WorldView | None = None,
+                 world_view: NpzWorldView | None = None,
                  grid_radius: int = DEFAULT_GRID_RADIUS):
         self.distance = distance
         self.world_view = world_view

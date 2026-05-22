@@ -23,9 +23,9 @@ from typing import Callable
 
 import numpy as np
 
-CELL_BLOCKS = 4
+from mdp.world import CELL_BLOCKS, DATA_DIR
+
 DEFAULT_RADIUS_BLOCKS = 1024
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 
 def materialize(seed: int, radius_cells: int, gen: Callable[[int, int], int],
@@ -52,7 +52,7 @@ def main():
     ap.add_argument("--radius-blocks", type=int, default=DEFAULT_RADIUS_BLOCKS)
     args = ap.parse_args()
 
-    from agent.biomegen import cubiomes_gen
+    from mdp.biomegen import cubiomes_gen
     gen = cubiomes_gen(args.seed)
     radius_cells = args.radius_blocks // CELL_BLOCKS
     out = DATA_DIR / f"biomes_{args.seed}.npz"

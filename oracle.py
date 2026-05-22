@@ -20,7 +20,7 @@ This is a 1-(1/e) approximation to weighted orienteering when the
 "reward" is uniform set coverage, which is the case here. Tractable for
 10-minute budgets at the radii we use.
 
-Biome data comes from `NpzWorldView(seed)` (agent/world.py), which reads
+Biome data comes from `NpzWorldView(seed)` (mdp/world.py), which reads
 a pre-extracted dump from `data/biomes_<seed>.npz`. Generate that file
 once per seed via `python tools/extract_biomes.py --seed N`.
 """
@@ -29,8 +29,8 @@ import math
 from dataclasses import dataclass
 from typing import Callable
 
-from agent.env import NUM_ACTIONS
-from agent.world import CELL_BLOCKS, NpzWorldView
+from mdp.env import NUM_ACTIONS
+from mdp.world import CELL_BLOCKS, NpzWorldView
 
 # Empirical pathfinder speed under sprint+jump. Re-measure once the
 # bridge is profiled; conservative estimate for budgeting.
@@ -114,7 +114,7 @@ def _snap_to_compass(dx: float, dz: float) -> Hop:
     """Convert a free (dx, dz) vector in blocks to the nearest 8-way hop.
 
     The bridge accepts (theta_deg, distance_blocks); theta is measured
-    clockwise from +z (north), matching `agent/env.py::action_to_theta`.
+    clockwise from +z (north), matching `mdp/env.py::action_to_theta`.
     """
     distance = int(round(math.hypot(dx, dz)))
     theta = (math.degrees(math.atan2(dx, dz)) + 360.0) % 360.0

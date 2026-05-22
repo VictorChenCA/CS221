@@ -16,7 +16,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agent.env import Env, NUM_ACTIONS, action_to_theta
+from mdp.env import Env, NUM_ACTIONS, action_to_theta
 
 
 def main():

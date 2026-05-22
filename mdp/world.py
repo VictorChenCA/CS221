@@ -17,7 +17,6 @@ position); in complete mode the grid it ships is ignored.
 """
 
 from pathlib import Path
-from typing import Protocol
 
 import numpy as np
 
@@ -25,11 +24,6 @@ CELL_BLOCKS = 4
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 UNKNOWN_BIOME = -1
-
-
-class WorldView(Protocol):
-    def biome_at(self, cell_x: int, cell_z: int) -> int: ...
-    def get_grid(self, cell_x: int, cell_z: int, radius_cells: int) -> np.ndarray: ...
 
 
 class NpzWorldView:
