@@ -23,7 +23,11 @@ from pathlib import Path
 from typing import Callable
 
 _CUBIOMES_DIR = Path(__file__).resolve().parent.parent / "tools" / "cubiomes"
-_LIB_NAME = "libcubiomes.dylib" if sys.platform == "darwin" else "libcubiomes.so"
+_LIB_NAME = (
+    "libcubiomes.dylib" if sys.platform == "darwin"
+    else "libcubiomes.dll" if sys.platform == "win32"
+    else "libcubiomes.so"
+)
 CUBIOMES_LIB = _CUBIOMES_DIR / _LIB_NAME
 
 # From cubiomes/biome_const.h (1.20.x version constant). Update if the
