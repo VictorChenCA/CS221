@@ -3,12 +3,14 @@
 //   request:  {"theta": 90, "distance": 100}
 //   response: {"biomeId", "biomeName", "cellX", "cellZ", "x", "z",
 //              "health", "food", "numVisited", "visitedBiomes",
-//              "gridRadius", "grid", "stuck"}
+//              "stuck"?, "gridRadius"?, "grid"?}
 //
-// The world is sampled on a 4-block stride to match Minecraft 1.18+'s
-// native biome cell. `grid` is a flat (2r+1)x(2r+1) row-major array of
-// biome ids in row-major order with +dz as the outer index. A value of
-// -1 means "not visible" (currently unused; reserved for line-of-sight).
+// `grid`/`gridRadius` are only shipped when WORLD_MODE=los. In complete
+// mode the agent overlays the grid from a pre-extracted seed dump on
+// the Python side. The grid is a flat (2r+1)x(2r+1) row-major array of
+// biome ids sampled on a 4-block stride, with +dz as the outer index.
+// A value of -1 means "unknown": either an un-streamed chunk (the_void
+// sentinel) or filtered by the visible() predicate for line-of-sight.
 
 const net = require('net');
 const mineflayer = require('mineflayer');

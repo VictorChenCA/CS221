@@ -63,11 +63,7 @@ def run_oracle_episode(env: Env, seed: int, radius_cells: int,
                        radius_cells=radius_cells, time_budget_s=budget_s)
     trail = [warmup]
     for hop in plan.hops:
-        # Env only exposes compass-indexed steps; oracle hops carry an
-        # exact distance, so send the raw dict through the socket.
-        act = {"theta": hop.theta_deg, "distance": hop.distance_blocks}
-        env.sock.sendall((json.dumps(act) + "\n").encode())
-        trail.append(env._read_line())
+        trail.append(env.step_raw(hop.theta_deg, hop.distance_blocks))
     return trail
 
 

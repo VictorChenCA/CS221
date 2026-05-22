@@ -20,11 +20,9 @@ This is a 1-(1/e) approximation to weighted orienteering when the
 "reward" is uniform set coverage, which is the case here. Tractable for
 10-minute budgets at the radii we use.
 
-Biome data comes from `NpzBiomeSource(seed)`, which reads a pre-extracted
-biome dump from `data/biomes_<seed>.npz`. Generate that file once per
-seed using a cubiomes binding (preferred — no server needed) or by
-harvesting `mc-server/world/region/*.mca` with anvil-parser. See
-`tools/extract_biomes.py` (TODO).
+Biome data comes from `NpzWorldView(seed)` (agent/world.py), which reads
+a pre-extracted dump from `data/biomes_<seed>.npz`. Generate that file
+once per seed via `python tools/extract_biomes.py --seed N`.
 """
 
 import math

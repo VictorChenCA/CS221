@@ -51,6 +51,11 @@ class NpzWorldView:
                 f"`python tools/extract_biomes.py --seed {seed}` first."
             )
         z = np.load(path)
+        if "seed" in z.files and int(z["seed"]) != seed:
+            raise ValueError(
+                f"npz at {path} was built for seed {int(z['seed'])}, "
+                f"not {seed}. Regenerate or rename the file."
+            )
         self.biomes: np.ndarray = z["biomes"]
         self.origin_cell = tuple(int(v) for v in z["origin_cell"])
 

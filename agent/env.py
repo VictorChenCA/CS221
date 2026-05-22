@@ -43,11 +43,13 @@ class Env:
         self._buf = b""
 
     def step(self, action: int) -> dict:
-        msg = {"theta": action_to_theta(action), "distance": self.distance}
-        return self._send(msg)
+        return self.step_raw(action_to_theta(action), self.distance)
 
-    def _send(self, msg: dict) -> dict:
-        self.sock.sendall((json.dumps(msg) + "\n").encode())
+    def step_raw(self, theta_deg: float, distance_blocks: int) -> dict:
+        """Send a single (theta, distance) hop. Used by the oracle path,
+        which carries exact distances rather than compass indices."""
+        self.sock.sendall((json.dumps(
+            {"theta": theta_deg, "distance": distance_blocks}) + "\n").encode())
         obs = self._read_line()
         if self.world_view is not None:
             grid = self.world_view.get_grid(obs["cellX"], obs["cellZ"], self.grid_radius)
