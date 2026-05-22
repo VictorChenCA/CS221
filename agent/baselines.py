@@ -32,26 +32,65 @@ class RandomPolicy:
 
 
 class FrontierPolicy:
-    """Greedy frontier exploration — proposal §6 non-trivial baseline.
+    """Greedy frontier exploration baseline.
 
-    Yamauchi (1997). At each step, pick the compass direction whose
-    sector contains the largest unexplored area (cells with unknown
-    biome id within some radius of the agent). Falls back to random
-    when no frontier is visible.
-
-    NOTE: stub — implementation owned by Victor. Needs:
-      - a persistent known-world map `(cellX, cellZ) -> biomeId`,
-        updated from each obs (proposal §2: 4x4 biome cells)
-      - sector binning of unknown cells into the 8 compass actions
-      - tie-breaking + fallback when all sectors are zero
+    Scores each compass direction by counting nearby cells whose biome
+    has not yet been visited. Chooses the highest-scoring direction.
+    Falls back to random if all scores are zero.
     """
 
     def __init__(self, seed: int | None = None):
         self.rng = random.Random(seed)
-        self.known: dict[tuple[int, int], int] = {}
 
     def reset(self) -> None:
-        self.known.clear()
+        pass
 
     def act(self, obs: dict) -> int:
-        raise NotImplementedError("FrontierPolicy.act — TODO (Victor)")
+        grid = obs["grid"]
+        r = obs["gridRadius"]
+        size = 2 * r + 1
+        visited = set(obs["visitedBiomes"])
+
+        # One score per compass direction.
+        scores = [0 for _ in range(NUM_ACTIONS)]
+
+        for row in range(size):
+            for col in range(size):
+                dx = col - r
+                dz = row - r
+
+                # Skip center cell.
+                if dx == 0 and dz == 0:
+                    continue
+
+                biome_id = grid[row * size + col]
+
+                # Ignore invisible/invalid cells.
+                if biome_id == -1:
+                    continue
+
+                # Only reward unseen biomes.
+                if biome_id in visited:
+                    continue
+
+                # Convert cell direction into compass sector.
+                angle = math.atan2(dx, -dz)
+                if angle < 0:
+                    angle += 2 * math.pi
+
+                sector = int(round(angle / (2 * math.pi / NUM_ACTIONS))) % NUM_ACTIONS
+                scores[sector] += 1
+
+        best_score = max(scores)
+
+        # No frontier found -> random fallback.
+        if best_score == 0:
+            return self.rng.randrange(NUM_ACTIONS)
+
+        best_actions = [
+            action
+            for action, score in enumerate(scores)
+            if score == best_score
+        ]
+
+        return self.rng.choice(best_actions)
