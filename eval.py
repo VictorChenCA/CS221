@@ -26,6 +26,7 @@ from pathlib import Path
 
 from agent.env import Env
 from agent.baselines import RandomPolicy, FrontierPolicy
+from agent.world import NpzWorldView
 
 RESULTS_DIR = Path(__file__).parent / "results"
 DEFAULT_BUDGET_S = 600.0     # 10 minutes, proposal §2
@@ -133,9 +134,14 @@ def main():
     ap.add_argument("--budget-s", type=float, default=DEFAULT_BUDGET_S)
     ap.add_argument("--radius", type=int, default=64,
                     help="oracle search radius in cells")
+    ap.add_argument("--mode", choices=["complete", "los"], default="complete",
+                    help="proposal §2 world setting; 'complete' loads "
+                         "data/biomes_<seed>.npz, 'los' uses the bridge grid")
     args = ap.parse_args()
 
-    env = Env(port=9000 + args.bot_id, timeout=args.budget_s + 60)
+    view = NpzWorldView(args.seed) if args.mode == "complete" else None
+    env = Env(port=9000 + args.bot_id, timeout=args.budget_s + 60,
+              world_view=view)
     try:
         if args.policy == "oracle":
             trail = run_oracle_episode(env, args.seed, args.radius, args.budget_s)

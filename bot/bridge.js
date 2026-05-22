@@ -21,6 +21,10 @@ const PORT = parseInt(process.env.MC_PORT || '25565', 10);
 const BRIDGE_PORT = 9000 + ID;
 const GRID_RADIUS = parseInt(process.env.GRID_RADIUS || '8', 10);  // cells (1 cell = 4 blocks)
 const SPAWN_CHUNK_WAIT_MS = 2000;  // let initial chunk stream settle before serving the first obs
+// 'complete' = Python overlays the grid from a pre-extracted seed dump,
+// so we skip live sampling here. 'los' = bridge ships its loaded-chunk
+// grid (with the visible() filter) for the line-of-sight setting.
+const WORLD_MODE = process.env.WORLD_MODE || 'complete';
 
 // Visibility predicate — always-true under complete-knowledge.
 // Swap this out for raycasting / heightmap checks to get line-of-sight.
@@ -79,12 +83,12 @@ function sampleGrid(r) {
 }
 
 function getObs() {
-  const { cellX, cellZ, grid } = sampleGrid(GRID_RADIUS);
-  const centerIdx = (GRID_RADIUS) * (2 * GRID_RADIUS + 1) + GRID_RADIUS;
-  const biomeId = grid[centerIdx];
-  bot.visitedBiomes.add(biomeId);
   const p = bot.entity.position;
-  return {
+  const cellX = Math.floor(p.x / 4);
+  const cellZ = Math.floor(p.z / 4);
+  const biomeId = bot.world.getBiome(Math.floor(p.x), Math.floor(p.y), Math.floor(p.z));
+  bot.visitedBiomes.add(biomeId);
+  const obs = {
     biomeId,
     biomeName: mcData.biomes[biomeId]?.name ?? 'unknown',
     cellX,
@@ -95,9 +99,13 @@ function getObs() {
     food: bot.food,
     numVisited: bot.visitedBiomes.size,
     visitedBiomes: [...bot.visitedBiomes],
-    gridRadius: GRID_RADIUS,
-    grid,
   };
+  if (WORLD_MODE === 'los') {
+    const sample = sampleGrid(GRID_RADIUS);
+    obs.gridRadius = GRID_RADIUS;
+    obs.grid = sample.grid;
+  }
+  return obs;
 }
 
 const ACTION_TIMEOUT_MS = 30000;

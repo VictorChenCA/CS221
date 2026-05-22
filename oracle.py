@@ -29,21 +29,14 @@ harvesting `mc-server/world/region/*.mca` with anvil-parser. See
 
 import math
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Callable
 
-import numpy as np
-
 from agent.env import NUM_ACTIONS
-
-CELL_BLOCKS = 4  # Minecraft 1.18+ biome cell size in blocks
+from agent.world import CELL_BLOCKS, NpzWorldView
 
 # Empirical pathfinder speed under sprint+jump. Re-measure once the
 # bridge is profiled; conservative estimate for budgeting.
 WALK_SPEED_BPS = 4.3
-
-DATA_DIR = Path(__file__).parent / "data"
-
 
 BiomeFn = Callable[[int, int], int]  # (cellX, cellZ) -> biome id (or -1 = unknown)
 
@@ -60,38 +53,6 @@ class Plan:
     expected_biomes: list[int]  # in visit order, including the starting biome
 
 
-class NpzBiomeSource:
-    """Load a pre-extracted biome map dump from disk.
-
-    File format (numpy savez_compressed):
-      - biomes:      int16 array, shape (H, W)
-      - origin_cell: int32 array [cellX0, cellZ0] of biomes[0, 0]
-
-    Out-of-window cells return -1, the same sentinel the bridge uses
-    for unknown cells. Generate dumps with tools/extract_biomes.py.
-    """
-
-    def __init__(self, seed: int, data_dir: Path = DATA_DIR):
-        path = data_dir / f"biomes_{seed}.npz"
-        if not path.exists():
-            raise FileNotFoundError(
-                f"no biome dump at {path}. Run "
-                f"`python tools/extract_biomes.py --seed {seed}` first."
-            )
-        z = np.load(path)
-        self.biomes = z["biomes"]
-        self.origin_cell = tuple(int(v) for v in z["origin_cell"])
-
-    def __call__(self, cell_x: int, cell_z: int) -> int:
-        ox, oz = self.origin_cell
-        i = cell_z - oz
-        j = cell_x - ox
-        h, w = self.biomes.shape
-        if not (0 <= i < h and 0 <= j < w):
-            return -1
-        return int(self.biomes[i, j])
-
-
 def plan(
     seed: int,
     start_cell: tuple[int, int],
@@ -101,7 +62,7 @@ def plan(
 ) -> Plan:
     """Greedy orienteering plan. See module docstring for the algorithm."""
     if biome_at is None:
-        biome_at = NpzBiomeSource(seed)
+        biome_at = NpzWorldView(seed).biome_at
 
     sx, sz = start_cell
 

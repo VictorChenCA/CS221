@@ -1,2 +1,2 @@
 numpy
-anvil-parser
+pytest
