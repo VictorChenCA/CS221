@@ -30,7 +30,7 @@ const SPAWN_CHUNK_WAIT_MS = 2000;  // let initial chunk stream settle before ser
 // from spawn, so chunks at the tp destination are already loaded.
 const DISPERSE_R = parseInt(process.env.DISPERSE_R || '250', 10);
 const DISPERSE_N = parseInt(process.env.DISPERSE_N || '5', 10);
-const DISPERSE_WAIT_MS = 3000;  // give the /tp packet + new chunks time to settle
+const LAND_WAIT_MS = 8000;  // time to fall from Y=250 + load destination chunks
 // 'complete' = Python overlays the grid from a pre-extracted seed dump,
 // so we skip live sampling here. 'los' = bridge ships its loaded-chunk
 // grid (with the visible() filter) for the line-of-sight setting.
@@ -60,21 +60,20 @@ bot.once('spawn', () => {
   const tx = Math.round(Math.cos(angle) * DISPERSE_R);
   const tz = Math.round(Math.sin(angle) * DISPERSE_R);
   console.log(`bot ${ID} spawned, dispersing to (${tx}, ${tz})`);
-  // Freeze mineflayer's client physics across the /tp so it doesn't
-  // ship a stale position the NMS validator rejects as "Invalid move
-  // player packet". Re-enabled after the server confirms the teleport.
-  bot.physicsEnabled = false;
-  // Y=250 is above any terrain; bot falls to surface once physics
-  // resumes (needs allow-flight=true to tolerate the brief airborne phase).
+  // Y=250 is above any terrain; bot falls to surface (needs
+  // allow-flight=true to tolerate the brief airborne phase).
   bot.chat(`/tp ${tx} 250 ${tz}`);
-  setTimeout(() => {
-    bot.physicsEnabled = true;
-    console.log(`bot ${ID} ready at`,
-      bot.entity && bot.entity.position
-        ? `(${bot.entity.position.x.toFixed(0)}, ${bot.entity.position.z.toFixed(0)})`
-        : '(no position?)');
-    startServer();
-  }, SPAWN_CHUNK_WAIT_MS + DISPERSE_WAIT_MS);
+  // Wait for the server's forced teleport to arrive (forcedMove event),
+  // then give the bot LAND_WAIT_MS to fall and chunks to load before
+  // opening the agent socket.
+  bot.once('forcedMove', () => {
+    setTimeout(() => {
+      const p = bot.entity && bot.entity.position;
+      console.log(`bot ${ID} ready at`,
+        p ? `(${p.x.toFixed(0)}, ${p.y.toFixed(0)}, ${p.z.toFixed(0)})` : '(no position?)');
+      startServer();
+    }, LAND_WAIT_MS);
+  });
 });
 
 bot.on('error', (e) => console.error(`bot ${ID} error:`, e.message));
