@@ -32,9 +32,11 @@ MC_1_20 = 0x12100
 DIM_OVERWORLD = 0
 SCALE_4 = 4  # one biome per 4-block cell; matches our MDP cell size
 
-# Generator struct in cubiomes is ~700 bytes for 1.20; oversize the
-# buffer so we don't depend on its exact layout.
-_GENERATOR_BYTES = 4096
+# Measured sizeof(Generator) for cubiomes 1.20.x is 27,592 bytes
+# (LayerStack + BiomeNoise + NetherNoise + EndNoise). Oversize to be
+# safe across upstream bumps; this is the stack of one Python object,
+# so the ~5 KB overhead is irrelevant.
+_GENERATOR_BYTES = 32768
 
 
 def cubiomes_gen(seed: int) -> Callable[[int, int], int]:

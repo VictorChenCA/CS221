@@ -2,7 +2,7 @@
 
 Iterates a generator callable over a square cell window and writes the
 result as a dense int16 array. The generator is anything that satisfies
-`(cell_x, cell_z) -> int`; production uses `agent.biomegen.cubiomes_gen`,
+`(cell_x, cell_z) -> int`; production uses `mdp.biomegen.cubiomes_gen`,
 tests use a plain dict's `.get`.
 
 File format (numpy savez_compressed):
@@ -13,13 +13,16 @@ File format (numpy savez_compressed):
   format_version:   int8
 
 Usage:
-    python tools/extract_biomes.py --seed 1111
-    python tools/extract_biomes.py --seed 1111 --radius-blocks 2048
+    python3 tools/extract_biomes.py --seed 1111
+    python3 tools/extract_biomes.py --seed 1111 --radius-blocks 2048
 """
 
 import argparse
+import sys
 from pathlib import Path
 from typing import Callable
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import numpy as np
 

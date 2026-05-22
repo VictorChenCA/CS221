@@ -42,7 +42,7 @@ class NpzWorldView:
         if not path.exists():
             raise FileNotFoundError(
                 f"no biome dump at {path}. Run "
-                f"`python tools/extract_biomes.py --seed {seed}` first."
+                f"`python3 tools/extract_biomes.py --seed {seed}` first."
             )
         z = np.load(path)
         if "seed" in z.files and int(z["seed"]) != seed:

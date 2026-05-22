@@ -12,9 +12,9 @@ over seeds owns that — eval.py just runs one episode against whatever
 world is currently up.
 
 Usage:
-    python eval.py --policy random   --seed 123 --episode 0
-    python eval.py --policy frontier --seed 123 --episode 1 --budget-s 600
-    python eval.py --policy oracle   --seed 123 --episode 2 --radius 64
+    python3 eval.py --policy random   --seed 123 --episode 0
+    python3 eval.py --policy frontier --seed 123 --episode 1 --budget-s 600
+    python3 eval.py --policy oracle   --seed 123 --episode 2 --radius 64
 """
 
 import argparse

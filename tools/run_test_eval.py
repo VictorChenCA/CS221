@@ -7,10 +7,10 @@ sequentially across all 15 bots in parallel. Wall-clock per policy
 policies (random, frontier, oracle), 45 episodes overall.
 
 Prereqs: cubiomes built (README §1.4) AND a biome dump per test seed
-(`python tools/extract_biomes.py --seed N` for 123, 456, 789).
+(`python3 tools/extract_biomes.py --seed N` for 123, 456, 789).
 
 Usage:
-    python tools/run_test_eval.py
+    python3 tools/run_test_eval.py
 """
 
 import atexit
@@ -100,7 +100,7 @@ def main() -> None:
     for s in SEEDS:
         if not (ROOT / "data" / f"biomes_{s}.npz").exists():
             sys.exit(f"missing data/biomes_{s}.npz — run "
-                     f"`python tools/extract_biomes.py --seed {s}` first")
+                     f"`python3 tools/extract_biomes.py --seed {s}` first")
 
     servers = []
     for i, seed in enumerate(SEEDS):

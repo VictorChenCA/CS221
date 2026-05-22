@@ -4,8 +4,8 @@ Connects to a running bot bridge on port 9000+id and steps through all
 8 compass actions at the configured hop distance, printing position and
 biome after each step. Usage:
 
-    python tools/test_locomotion.py                 # bot 0, distance 16
-    python tools/test_locomotion.py --id 3 --dist 32
+    python3 tools/test_locomotion.py                 # bot 0, distance 16
+    python3 tools/test_locomotion.py --id 3 --dist 32
 
 Requires the Paper server and bot bridge to already be running.
 """

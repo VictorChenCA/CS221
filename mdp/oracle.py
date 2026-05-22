@@ -22,7 +22,7 @@ This is a 1-(1/e) approximation to weighted orienteering when the
 
 Biome data comes from `NpzWorldView(seed)` (mdp/world.py), which reads
 a pre-extracted dump from `data/biomes_<seed>.npz`. Generate that file
-once per seed via `python tools/extract_biomes.py --seed N`.
+once per seed via `python3 tools/extract_biomes.py --seed N`.
 """
 
 import math
