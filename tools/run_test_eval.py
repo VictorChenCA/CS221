@@ -27,7 +27,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SEEDS = [123, 456, 789]
-POLICIES = ["frontier", "random"]
+POLICIES = ["frontier"]
 BOTS_PER_SERVER = 3
 BUDGET_S = 300
 BASE_MC_PORT = 25565

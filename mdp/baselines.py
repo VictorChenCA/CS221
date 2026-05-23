@@ -33,22 +33,27 @@ class RandomPolicy:
 
 
 class FrontierPolicy:
-    """Closest-unfamiliar variant of Yamauchi (1997).
+    """Yamauchi (1997) frontier exploration, adapted.
 
-    Scans the local biome grid for the cell whose biome has not yet
-    been visited and is geometrically closest to the bot, then snaps
-    the bot-to-cell direction onto one of the 8 compass actions.
+    1. Build a "novel" mask: cells whose biome is known (≠ -1) and not
+       in the visited set.
+    2. 4-connected flood-fill to group novel cells into clusters.
+    3. Drop clusters smaller than MIN_CLUSTER (Yamauchi-style noise
+       rejection).
+    4. Pick the cluster whose centroid is closest to the bot.
+    5. Compass-snap the bot→centroid direction onto one of the 8
+       compass actions.
 
-    Notes on Yamauchi correspondence:
-      - 'Frontier' here = a cell whose biome ∉ visited. Yamauchi's
-        occupancy-based notion doesn't directly apply (in complete-
-        knowledge mode every cell is known), so we substitute biome
-        novelty for known-but-unentered cells.
-      - We use Euclidean distance, not A* over walkable cells. For
-        vanilla flat-ish overworld with 100-block hops this is fine.
-      - We don't cluster cells into regions or compute centroids; the
-        single closest unfamiliar cell becomes the target.
+    Differences from the paper:
+      - 'Frontier' = biome novelty (not occupancy boundary). Under
+        complete knowledge there's no unknown space; biome ∉ visited
+        is the closest analog.
+      - Euclidean centroid distance instead of A* path distance —
+        the overworld is mostly traversable with 100-block hops.
+      - No reachability prune; relies on pathfinder to fail-stuck.
     """
+
+    MIN_CLUSTER = 3  # cells; drop tiny novel-cell specks (~12-block patches)
 
     def __init__(self, seed: int | None = None):
         self.rng = random.Random(seed)
@@ -61,27 +66,59 @@ class FrontierPolicy:
         r = obs["gridRadius"]
         size = 2 * r + 1
         visited = set(obs["visitedBiomes"])
+        n = size * size
 
-        best_d2 = float("inf")
-        best_dx = best_dz = 0
-        for row in range(size):
-            for col in range(size):
-                dx = col - r
-                dz = row - r
-                if dx == 0 and dz == 0:
-                    continue
-                biome_id = grid[row * size + col]
-                if biome_id == -1 or biome_id in visited:
-                    continue
-                d2 = dx * dx + dz * dz
-                if d2 < best_d2:
-                    best_d2, best_dx, best_dz = d2, dx, dz
+        # Step 1: novel mask.
+        novel = [False] * n
+        for k in range(n):
+            b = grid[k]
+            if b != -1 and b not in visited:
+                novel[k] = True
 
-        # No unfamiliar cell visible -> random fallback.
-        if best_d2 == float("inf"):
+        # Step 2 + 3: flood-fill clusters; record (size, Σdx, Σdz) per cluster.
+        label = [-1] * n
+        clusters = []
+        for start in range(n):
+            if not novel[start] or label[start] != -1:
+                continue
+            cid = len(clusters)
+            label[start] = cid
+            stack = [start]
+            cnt = sdx = sdz = 0
+            while stack:
+                k = stack.pop()
+                row, col = divmod(k, size)
+                cnt += 1
+                sdx += col - r
+                sdz += row - r
+                if col > 0:
+                    nk = k - 1
+                    if novel[nk] and label[nk] == -1:
+                        label[nk] = cid; stack.append(nk)
+                if col < size - 1:
+                    nk = k + 1
+                    if novel[nk] and label[nk] == -1:
+                        label[nk] = cid; stack.append(nk)
+                if row > 0:
+                    nk = k - size
+                    if novel[nk] and label[nk] == -1:
+                        label[nk] = cid; stack.append(nk)
+                if row < size - 1:
+                    nk = k + size
+                    if novel[nk] and label[nk] == -1:
+                        label[nk] = cid; stack.append(nk)
+            clusters.append((cnt, sdx, sdz))
+
+        # Filter and choose nearest centroid.
+        candidates = [(c, sx, sz) for (c, sx, sz) in clusters if c >= self.MIN_CLUSTER]
+        if not candidates:
             return self.rng.randrange(NUM_ACTIONS)
+        cnt, sx, sz = min(candidates,
+                          key=lambda c: (c[1] / c[0]) ** 2 + (c[2] / c[0]) ** 2)
+        cdx, cdz = sx / cnt, sz / cnt
 
-        angle = math.atan2(best_dx, -best_dz)
+        # Compass-snap.
+        angle = math.atan2(cdx, -cdz)
         if angle < 0:
             angle += 2 * math.pi
         return int(round(angle / (2 * math.pi / NUM_ACTIONS))) % NUM_ACTIONS
