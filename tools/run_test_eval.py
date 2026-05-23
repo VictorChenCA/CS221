@@ -28,8 +28,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SEEDS = [123, 456, 789]
 POLICIES = ["random", "frontier"]
-BOTS_PER_SERVER = 10
-BUDGET_S = 300
+BOTS_PER_SERVER = 5
+BUDGET_S = 600
+# Lets us stack episodes across sequential runs of this driver:
+# run 1 with EPISODE_OFFSET=0 writes ep ids 0..(BOTS_PER_SERVER-1),
+# run 2 with EPISODE_OFFSET=5 writes ep ids 5..(BOTS_PER_SERVER-1+5), etc.
+EPISODE_OFFSET = int(os.environ.get("EPISODE_OFFSET", "0"))
 BASE_MC_PORT = 25565
 SETTLE_S = 35
 SERVER_READY_TIMEOUT_S = 180
@@ -170,11 +174,12 @@ def main() -> None:
         for s_idx, (seed, _, _) in enumerate(servers):
             for b in range(BOTS_PER_SERVER):
                 bot_id = s_idx * BOTS_PER_SERVER + b
-                log = LOGS / f"eval_{policy}_{seed}_{b}.log"
+                episode = b + EPISODE_OFFSET
+                log = LOGS / f"eval_{policy}_{seed}_{episode}.log"
                 evals.append(spawn(
                     [sys.executable, "eval.py", "--policy", policy,
                      "--seed", str(seed), "--bot-id", str(bot_id),
-                     "--episode", str(b), "--budget-s", str(BUDGET_S)],
+                     "--episode", str(episode), "--budget-s", str(BUDGET_S)],
                     log, cwd=ROOT))
         for p in evals:
             p.wait()
