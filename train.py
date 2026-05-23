@@ -49,7 +49,9 @@ from mdp.qlearn import LinearQ, compute_reward
 LOGS = ROOT / "logs"
 WEIGHTS_OUT = ROOT / "weights" / "qlearn.npz"
 TRAIN_PORT = 25570              # avoid colliding with test-eval's 25565-7
-BOT_PORT_BASE = 9100            # avoid colliding with test-eval's 9000-14
+# Bot bridge hardcodes its TCP port to (9000 + bot_id); we match it.
+# Train shouldn't run concurrently with test-eval anyway.
+BOT_PORT_BASE = 9000
 SERVER_READY_TIMEOUT_S = 180
 BOT_SETTLE_S = 25               # /tp dispersal + chunk load + bridge open
 
@@ -206,9 +208,16 @@ def main() -> None:
     ap.add_argument("--weights-out", type=Path, default=WEIGHTS_OUT)
     ap.add_argument("--alpha", type=float, default=0.05)
     ap.add_argument("--gamma", type=float, default=0.95)
+    ap.add_argument("--seeds", type=str, default=None,
+                    help="comma-separated seeds; overrides seeds.txt")
+    ap.add_argument("--no-save", action="store_true",
+                    help="don't persist weights (use for smoke tests)")
+    ap.add_argument("--cleanup", action="store_true",
+                    help="rm -rf staged mc-server-train<seed>/ dirs after the run")
     args = ap.parse_args()
 
-    seeds = load_train_seeds()
+    seeds = ([int(s) for s in args.seeds.split(",")] if args.seeds
+             else load_train_seeds())
     n_eps_total = len(seeds) * args.episodes_per_seed
     print(f"[train] {len(seeds)} seeds × {args.episodes_per_seed} eps = {n_eps_total} total episodes")
 
@@ -259,11 +268,17 @@ def main() -> None:
 
                 agent.decay_epsilon(ep_global)
                 ep_global += 1
-                agent.save(args.weights_out)
+                if not args.no_save:
+                    agent.save(args.weights_out)
         finally:
             reap(server_proc)
+            if args.cleanup:
+                shutil.rmtree(dst, ignore_errors=True)
 
-    print(f"[complete] saved weights to {args.weights_out}")
+    if args.no_save:
+        print("[complete] --no-save: weights discarded")
+    else:
+        print(f"[complete] saved weights to {args.weights_out}")
 
 
 if __name__ == "__main__":
