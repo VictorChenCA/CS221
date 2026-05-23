@@ -28,8 +28,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SEEDS = [123, 456, 789]
 POLICIES = ["random", "frontier"]
-BOTS_PER_SERVER = 5
-BUDGET_S = 600
+BOTS_PER_SERVER = 3
+BUDGET_S = 300
 BASE_MC_PORT = 25565
 SETTLE_S = 35
 SERVER_READY_TIMEOUT_S = 180
@@ -142,6 +142,11 @@ def main() -> None:
               log, cwd=d)
     for seed, _, _ in servers:
         wait_for_done(LOGS / f"server_{seed}.log", f"server {seed}")
+    print()
+    print("=== Server endpoints (connect with vanilla Minecraft client) ===")
+    for seed, port, _ in servers:
+        print(f"  seed={seed}  ->  localhost:{port}")
+    print()
 
     n_bots = 0
     for s_idx, (_, port, _) in enumerate(servers):
