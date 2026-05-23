@@ -135,6 +135,8 @@ def main():
     ap.add_argument("--mode", choices=["complete", "los"], default="complete",
                     help="proposal §2 world setting; 'complete' loads "
                          "data/biomes_<seed>.npz, 'los' uses the bridge grid")
+    ap.add_argument("--weights", type=Path, default=Path("weights/qlearn.npz"),
+                    help="path to trained linear-Q weights (for --policy qlearn)")
     args = ap.parse_args()
 
     view = NpzWorldView(args.seed) if args.mode == "complete" else None
@@ -144,7 +146,10 @@ def main():
         if args.policy == "oracle":
             trail = run_oracle_episode(env, args.seed, args.radius, args.budget_s)
         elif args.policy == "qlearn":
-            raise NotImplementedError("qlearn integration — TODO (§C7)")
+            from mdp.qlearn import LinearQ
+            agent = LinearQ.load(args.weights)
+            agent.epsilon = 0.0  # greedy at eval
+            trail = run_policy_episode(env, agent, args.budget_s)
         else:
             policy = make_policy(args.policy, seed=args.seed)
             trail = run_policy_episode(env, policy, args.budget_s)
