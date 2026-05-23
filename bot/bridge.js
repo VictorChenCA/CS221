@@ -56,6 +56,7 @@ bot.once('spawn', () => {
   // lands on a tree after the Y=250 disperse fall.
   const moves = new Movements(bot);
   moves.canDig = true;
+  moves.maxDropDown = 8;
   bot.pathfinder.setMovements(moves);
   // Disperse on a DISPERSE_R-block circle (proposal §6). The /tp
   // command needs op — see tools/run_test_eval.py which writes ops.json.
