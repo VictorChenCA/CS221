@@ -182,6 +182,53 @@ def main() -> None:
 
     n_results = len(list((ROOT / "results").glob("*.json"))) if (ROOT / "results").exists() else 0
     print(f"[complete] {n_results} result files in results/")
+    summarize_results()
+
+
+def summarize_results() -> None:
+    """Aggregate results/*.json into a printed table + results/summary.txt."""
+    import json
+    from collections import defaultdict
+    import statistics as stats
+
+    results_dir = ROOT / "results"
+    if not results_dir.exists():
+        return
+    rows = defaultdict(list)
+    for f in sorted(results_dir.glob("*.json")):
+        r = json.loads(f.read_text())
+        rows[(r["policy"], r["seed"])].append(r)
+    if not rows:
+        return
+
+    lines = []
+    lines.append(f"{'policy':<10} {'seed':>5} {'n':>2} {'ub_mean':>8} {'ub_max':>6} {'n_act':>6}")
+    lines.append("-" * 45)
+    for (p, s), rs in sorted(rows.items()):
+        ubs = [r["unique_biomes"] for r in rs]
+        ns = [r["n_actions"] for r in rs]
+        lines.append(f"{p:<10} {s:>5} {len(rs):>2} {sum(ubs)/len(ubs):>8.2f} "
+                     f"{max(ubs):>6} {sum(ns)/len(ns):>6.1f}")
+    lines.append("")
+    lines.append("=== aggregate by policy ===")
+    by_policy = defaultdict(list)
+    for (p, _), rs in rows.items():
+        by_policy[p].extend(rs)
+    for p, rs in sorted(by_policy.items()):
+        ubs = [r["unique_biomes"] for r in rs]
+        ent = [r["biome_entropy"] for r in rs]
+        cov = [r["position_coverage"] for r in rs]
+        sd = stats.stdev(ubs) if len(ubs) > 1 else 0.0
+        lines.append(f"  {p:<10} n={len(rs)} ub: mean={sum(ubs)/len(ubs):.2f} "
+                     f"sd={sd:.2f} max={max(ubs)} "
+                     f"| biome_ent={sum(ent)/len(ent):.2f} "
+                     f"| cov={sum(cov)/len(cov):.4f}")
+
+    summary = "\n".join(lines)
+    print()
+    print(summary)
+    (results_dir / "summary.txt").write_text(summary + "\n")
+    print(f"[summary] written to {results_dir / 'summary.txt'}")
 
 
 if __name__ == "__main__":
