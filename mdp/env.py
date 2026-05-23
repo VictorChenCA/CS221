@@ -21,7 +21,7 @@ from mdp.world import NpzWorldView
 
 NUM_ACTIONS = 8
 DEFAULT_DISTANCE = 100
-DEFAULT_GRID_RADIUS = 8  # cells; must match bot/bridge.js GRID_RADIUS default
+DEFAULT_GRID_RADIUS = 128  # cells = 32 chunks (1 chunk = 16 blocks = 4 cells)
 
 
 def action_to_theta(action: int) -> float:
