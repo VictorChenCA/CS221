@@ -32,3 +32,8 @@ mc-server/.console_history
 results/
 tools/cubiomes/
 mc-server-test*/
+
+# Paper runtime artifacts that escape mc-server/ when java is run from project root
+/cache/
+/libraries/
+/versions/

@@ -113,7 +113,7 @@ function sampleGrid(r) {
         grid[(dz + r) * size + (dx + r)] = -1;
         continue;
       }
-      const b = bot.world.getBiome(bx, y, bz);
+      const b = bot.world.getBiome({ x: bx, y, z: bz });
       // Overworld generation never produces the_void (id 0); a 0 read
       // means the chunk hasn't streamed in yet. Surface that as "unknown"
       // through the same -1 channel reserved for line-of-sight.
@@ -127,7 +127,7 @@ function getObs() {
   const p = bot.entity.position;
   const cellX = Math.floor(p.x / 4);
   const cellZ = Math.floor(p.z / 4);
-  const biomeId = bot.world.getBiome(Math.floor(p.x), Math.floor(p.y), Math.floor(p.z));
+  const biomeId = bot.world.getBiome({ x: Math.floor(p.x), y: Math.floor(p.y), z: Math.floor(p.z) });
   bot.visitedBiomes.add(biomeId);
   const obs = {
     biomeId,
@@ -158,7 +158,7 @@ function executeAction({ theta, distance }, cb) {
   const sx = Math.floor(p.x), sy = Math.floor(p.y), sz = Math.floor(p.z);
   const tx = p.x + Math.sin(rad) * distance;
   const tz = p.z + Math.cos(rad) * distance;
-  const startBiomeId = bot.world.getBiome(sx, sy, sz);
+  const startBiomeId = bot.world.getBiome({ x: sx, y: sy, z: sz });
   const startBiome = mcData.biomes[startBiomeId]?.name ?? 'unknown';
   const t0 = Date.now();
   const goal = new GoalNearXZ(tx, tz, 3);
