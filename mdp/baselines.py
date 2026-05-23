@@ -33,11 +33,21 @@ class RandomPolicy:
 
 
 class FrontierPolicy:
-    """Greedy frontier exploration baseline.
+    """Closest-unfamiliar variant of Yamauchi (1997).
 
-    Scores each compass direction by counting nearby cells whose biome
-    has not yet been visited. Chooses the highest-scoring direction.
-    Falls back to random if all scores are zero.
+    Scans the local biome grid for the cell whose biome has not yet
+    been visited and is geometrically closest to the bot, then snaps
+    the bot-to-cell direction onto one of the 8 compass actions.
+
+    Notes on Yamauchi correspondence:
+      - 'Frontier' here = a cell whose biome ∉ visited. Yamauchi's
+        occupancy-based notion doesn't directly apply (in complete-
+        knowledge mode every cell is known), so we substitute biome
+        novelty for known-but-unentered cells.
+      - We use Euclidean distance, not A* over walkable cells. For
+        vanilla flat-ish overworld with 100-block hops this is fine.
+      - We don't cluster cells into regions or compute centroids; the
+        single closest unfamiliar cell becomes the target.
     """
 
     def __init__(self, seed: int | None = None):
@@ -52,46 +62,26 @@ class FrontierPolicy:
         size = 2 * r + 1
         visited = set(obs["visitedBiomes"])
 
-        # One score per compass direction.
-        scores = [0 for _ in range(NUM_ACTIONS)]
-
+        best_d2 = float("inf")
+        best_dx = best_dz = 0
         for row in range(size):
             for col in range(size):
                 dx = col - r
                 dz = row - r
-
-                # Skip center cell.
                 if dx == 0 and dz == 0:
                     continue
-
                 biome_id = grid[row * size + col]
-
-                # Ignore invisible/invalid cells.
-                if biome_id == -1:
+                if biome_id == -1 or biome_id in visited:
                     continue
+                d2 = dx * dx + dz * dz
+                if d2 < best_d2:
+                    best_d2, best_dx, best_dz = d2, dx, dz
 
-                # Only reward unseen biomes.
-                if biome_id in visited:
-                    continue
-
-                # Convert cell direction into compass sector.
-                angle = math.atan2(dx, -dz)
-                if angle < 0:
-                    angle += 2 * math.pi
-
-                sector = int(round(angle / (2 * math.pi / NUM_ACTIONS))) % NUM_ACTIONS
-                scores[sector] += 1
-
-        best_score = max(scores)
-
-        # No frontier found -> random fallback.
-        if best_score == 0:
+        # No unfamiliar cell visible -> random fallback.
+        if best_d2 == float("inf"):
             return self.rng.randrange(NUM_ACTIONS)
 
-        best_actions = [
-            action
-            for action, score in enumerate(scores)
-            if score == best_score
-        ]
-
-        return self.rng.choice(best_actions)
+        angle = math.atan2(best_dx, -best_dz)
+        if angle < 0:
+            angle += 2 * math.pi
+        return int(round(angle / (2 * math.pi / NUM_ACTIONS))) % NUM_ACTIONS
