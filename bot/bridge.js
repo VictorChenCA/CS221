@@ -151,6 +151,7 @@ function getObs() {
 }
 
 const ACTION_TIMEOUT_MS = 30000;
+const BIOME_SAMPLE_MS = 1000;  // 20 ticks; biome cells are 4 blocks wide
 
 function executeAction({ theta, distance }, cb) {
   if (!distance) { cb(getObs()); return; }
@@ -165,11 +166,25 @@ function executeAction({ theta, distance }, cb) {
   const goal = new GoalNearXZ(tx, tz, 16);
   bot.pathfinder.setGoal(goal, false);
 
+  // Sample biome every ~1s during the hop so we catch mid-traversal
+  // biomes that the start/end snapshot would miss. Pathfinder walks
+  // ~4.3 b/s and biome cells are 4 blocks wide -> ~1 sample per cell.
+  let midSamples = 0;
+  const sampler = setInterval(() => {
+    if (!bot.entity || !bot.entity.position) return;
+    const q = bot.entity.position;
+    const bid = bot.world.getBiome(
+      { x: Math.floor(q.x), y: Math.floor(q.y), z: Math.floor(q.z) });
+    bot.visitedBiomes.add(bid);
+    midSamples++;
+  }, BIOME_SAMPLE_MS);
+
   let done = false;
   const finish = (stuck, reason) => {
     if (done) return;
     done = true;
     clearTimeout(timer);
+    clearInterval(sampler);
     bot.removeListener('goal_reached', onReach);
     bot.removeListener('path_update', onStuck);
     bot.pathfinder.setGoal(null);
@@ -182,7 +197,7 @@ function executeAction({ theta, distance }, cb) {
       `start=(${sx},${sy},${sz}) startBiome=${startBiome} ` +
       `target=(${Math.round(tx)},${Math.round(tz)}) ` +
       `end=(${obs.x},${obs.z}) endBiome=${obs.biomeName} ` +
-      `moved=${moved.toFixed(1)} dt=${dt}s ` +
+      `moved=${moved.toFixed(1)} dt=${dt}s samples=${midSamples} ` +
       `result=${stuck ? `STUCK:${reason}` : 'OK'}`);
     cb(obs);
   };
