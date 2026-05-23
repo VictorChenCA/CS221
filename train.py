@@ -1,26 +1,26 @@
 """Train linear Q-learning on the proposal's 10 train seeds (proposal §6).
 
-Per train seed:
-  1. Stage a Paper server dir (mc-server-train<seed>/) and boot it.
-  2. For each of EPISODES_PER_SEED episodes:
-     - Spawn one bot process (fresh `visitedBiomes` set each time).
-     - Connect Env, run the episode under ε-greedy, TD(0)-update Q after
-       every step.
-     - Kill the bot.
-  3. Kill the server.
+Parallel design — 10 worlds × 1 bot each × 3 rounds (Hogwild-ish shared W):
 
-Weights are persisted to weights/qlearn.npz after every episode (cheap).
-At eval time:  python eval.py --policy qlearn --weights weights/qlearn.npz
+  Outer loop (sequential, R rounds):
+    - Spawn 10 fresh bot bridges, one per server (fresh visitedBiomes each)
+    - Inner loop (parallel, 10 threads): each bot runs ONE episode and TD(0)
+      updates the shared agent.W as it goes. Updates are guarded by a
+      threading.Lock; per-step cost is microseconds vs the ~20s pathfinder
+      wait, so the lock is negligible.
+    - Kill all 10 bots; decay ε; save weights.
 
-Prereqs:
-  - Cubiomes built (README §1.4)
-  - Biome dump for every train seed:
-      for s in $(grep -v '^#' seeds.txt | sed -n '/^[0-9]/p' | head -10);
-      do python3 tools/extract_biomes.py --seed $s; done
+  Servers are booted once at the start and reused across all rounds.
+
+Checkpoint / resume:
+  weights/qlearn.npz stores W + epsilon + rounds_completed. If present at
+  start, training picks up at the next round. --fresh to override.
 
 Usage:
-    python3 train.py
-    python3 train.py --episodes-per-seed 3 --budget-s 300
+    python3 train.py                         # all 10 train seeds, 3 rounds
+    python3 train.py --episodes-per-seed 5   # 5 rounds instead of 3
+    python3 train.py --fresh                 # ignore any saved checkpoint
+    python3 train.py --seeds 1111,2222       # subset of seeds
 """
 
 import argparse
@@ -34,8 +34,11 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
+
+import numpy as np
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
@@ -43,17 +46,17 @@ sys.path.insert(0, str(ROOT))
 from mdp.env import Env
 from mdp.world import NpzWorldView
 from mdp.qlearn import LinearQ, compute_reward
+from mdp.features import featurize
 
 # ------- config -------------------------------------------------------------
 
 LOGS = ROOT / "logs"
 WEIGHTS_OUT = ROOT / "weights" / "qlearn.npz"
-TRAIN_PORT = 25570              # avoid colliding with test-eval's 25565-7
-# Bot bridge hardcodes its TCP port to (9000 + bot_id); we match it.
-# Train shouldn't run concurrently with test-eval anyway.
-BOT_PORT_BASE = 9000
-SERVER_READY_TIMEOUT_S = 180
-BOT_SETTLE_S = 25               # /tp dispersal + chunk load + bridge open
+TRAIN_PORT_BASE = 25570         # avoid colliding with test-eval's 25565-7
+BOT_PORT_BASE = 9000            # bridge.js hardcodes 9000+bot_id
+HEAP_GB = 2                     # per Paper server; 10 × 2 GB = 20 GB
+SERVER_READY_TIMEOUT_S = 240
+BOT_SETTLE_S = 35               # 10 bots/load takes longer than 3 bots/load
 
 PROCS: list[subprocess.Popen] = []
 
@@ -65,10 +68,8 @@ def cleanup() -> None:
         if p.poll() is None:
             p.terminate()
     for p in PROCS:
-        try:
-            p.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            p.kill()
+        try: p.wait(timeout=5)
+        except subprocess.TimeoutExpired: p.kill()
 
 
 atexit.register(cleanup)
@@ -94,7 +95,7 @@ def reap(p: subprocess.Popen) -> None:
         PROCS.remove(p)
 
 
-# ------- server staging (minimal duplicate from run_test_eval) --------------
+# ------- server staging -----------------------------------------------------
 
 def offline_uuid(name: str) -> str:
     h = bytearray(hashlib.md5(f"OfflinePlayer:{name}".encode()).digest())
@@ -104,7 +105,7 @@ def offline_uuid(name: str) -> str:
     return f"{s[0:8]}-{s[8:12]}-{s[12:16]}-{s[16:20]}-{s[20:]}"
 
 
-def stage_server_dir(seed: int, port: int, max_bot_id: int) -> Path:
+def stage_server_dir(seed: int, port: int, bot_id: int) -> Path:
     src = ROOT / "mc-server"
     dst = ROOT / f"mc-server-train{seed}"
     if not dst.exists():
@@ -122,12 +123,11 @@ def stage_server_dir(seed: int, port: int, max_bot_id: int) -> Path:
         text = re.sub(r"^level-seed=.*$", f"level-seed={seed}", text, flags=re.M)
         text = re.sub(r"^server-port=.*$", f"server-port={port}", text, flags=re.M)
         props.write_text(text)
-    # Ops list covers max_bot_id + the human ops.
-    ops = [{"uuid": offline_uuid(f"Explorer_{i}"), "name": f"Explorer_{i}",
-            "level": 4, "bypassesPlayerLimit": False}
-           for i in range(max_bot_id + 1)]
-    ops += [{"uuid": offline_uuid("Raz0rMC"), "name": "Raz0rMC",
-             "level": 4, "bypassesPlayerLimit": False}]
+    ops = [{"uuid": offline_uuid(f"Explorer_{bot_id}"),
+            "name": f"Explorer_{bot_id}", "level": 4,
+            "bypassesPlayerLimit": False},
+           {"uuid": offline_uuid("Raz0rMC"), "name": "Raz0rMC",
+            "level": 4, "bypassesPlayerLimit": False}]
     (dst / "ops.json").write_text(json.dumps(ops, indent=2))
     return dst
 
@@ -140,6 +140,26 @@ def wait_for_done(log_path: Path, label: str) -> None:
             return
         time.sleep(2)
     raise TimeoutError(f"{label} not ready within {SERVER_READY_TIMEOUT_S}s")
+
+
+# ------- checkpointing ------------------------------------------------------
+
+def save_checkpoint(agent: LinearQ, rounds_completed: int, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez(path, W=agent.W, alpha=np.float32(agent.alpha),
+             gamma=np.float32(agent.gamma), epsilon=np.float32(agent.epsilon),
+             rounds_completed=np.int32(rounds_completed))
+
+
+def load_checkpoint(path: Path, alpha: float, gamma: float,
+                    epsilon_decay_episodes: int) -> tuple[LinearQ, int]:
+    z = np.load(path)
+    agent = LinearQ(alpha=float(z["alpha"]), gamma=float(z["gamma"]),
+                    epsilon=float(z["epsilon"]),
+                    epsilon_decay_episodes=epsilon_decay_episodes)
+    agent.W = z["W"].astype(np.float32)
+    rounds_completed = int(z["rounds_completed"]) if "rounds_completed" in z.files else 0
+    return agent, rounds_completed
 
 
 # ------- training -----------------------------------------------------------
@@ -156,43 +176,55 @@ def connect_env(port: int, view: NpzWorldView, timeout: float) -> Env:
     raise RuntimeError(f"could not connect to bot on :{port}: {last_exc}")
 
 
-def run_train_episode(env: Env, agent: LinearQ, budget_s: float) -> dict:
-    prev = env.step(0)  # warmup observation
-    t0 = time.monotonic()
-    n_steps = 0
-    n_stuck = 0
-    cumulative_reward = 0.0
-    biomes_at_start = int(prev.get("numVisited", 0))
+# Hogwild-ish: one lock around `W` updates. Cheap vs the ~20s pathfinder hop;
+# guarantees correctness against numpy non-atomic in-place adds.
+W_LOCK = threading.Lock()
 
-    while time.monotonic() - t0 < budget_s:
-        a = agent.act(prev)
-        obs = env.step(a)
-        r = compute_reward(prev, obs)
-        agent.update(prev, a, r, obs, done=False)
-        cumulative_reward += r
-        n_steps += 1
-        if obs.get("stuck"):
-            n_stuck += 1
-        prev = obs
 
-    return {
-        "reward": cumulative_reward,
-        "steps": n_steps,
-        "stuck": n_stuck,
-        "unique_biomes": int(prev.get("numVisited", 0)) - biomes_at_start
-                          + (1 if biomes_at_start > 0 else 0),
-    }
+def locked_update(agent: LinearQ, s: dict, a: int, r: float, s_next: dict) -> None:
+    phi_s = featurize(s)
+    with W_LOCK:
+        q_sa = float(agent.W[a] @ phi_s)
+    target = r + agent.gamma * float(np.max(agent.W @ featurize(s_next)))
+    td_error = target - q_sa
+    with W_LOCK:
+        agent.W[a] += agent.alpha * td_error * phi_s
+
+
+def run_episode_thread(env: Env, agent: LinearQ, budget_s: float,
+                       seed: int, results: dict) -> None:
+    """One worker thread: drive `env` under ε-greedy for `budget_s` seconds,
+    TD-update shared `agent.W` after every step (W_LOCK-guarded)."""
+    try:
+        prev = env.step(0)
+        t0 = time.monotonic()
+        n_steps = 0; n_stuck = 0; total_r = 0.0
+        biomes_at_start = int(prev.get("numVisited", 0))
+        while time.monotonic() - t0 < budget_s:
+            a = agent.act(prev)
+            obs = env.step(a)
+            r = compute_reward(prev, obs)
+            locked_update(agent, prev, a, r, obs)
+            total_r += r
+            n_steps += 1
+            if obs.get("stuck"): n_stuck += 1
+            prev = obs
+        results[seed] = {
+            "ok": True, "reward": total_r, "steps": n_steps,
+            "stuck": n_stuck,
+            "unique_biomes": int(prev.get("numVisited", 0)),
+        }
+    except Exception as e:
+        results[seed] = {"ok": False, "error": str(e)}
 
 
 def load_train_seeds() -> list[int]:
     text = (ROOT / "seeds.txt").read_text()
-    # Take seeds until the "# test" header
     out = []
     in_train = False
     for line in text.splitlines():
         s = line.strip()
-        if not s:
-            continue
+        if not s: continue
         if s.startswith("#"):
             in_train = s.lower().startswith("# train")
             continue
@@ -203,75 +235,139 @@ def load_train_seeds() -> list[int]:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--episodes-per-seed", type=int, default=3)
+    ap.add_argument("--episodes-per-seed", type=int, default=3,
+                    help="number of rounds (each round = one episode in every world)")
     ap.add_argument("--budget-s", type=float, default=300.0)
     ap.add_argument("--weights-out", type=Path, default=WEIGHTS_OUT)
     ap.add_argument("--alpha", type=float, default=0.05)
     ap.add_argument("--gamma", type=float, default=0.95)
     ap.add_argument("--seeds", type=str, default=None,
                     help="comma-separated seeds; overrides seeds.txt")
-    ap.add_argument("--no-save", action="store_true",
-                    help="don't persist weights (use for smoke tests)")
+    ap.add_argument("--no-save", action="store_true")
     ap.add_argument("--cleanup", action="store_true",
                     help="rm -rf staged mc-server-train<seed>/ dirs after the run")
+    ap.add_argument("--fresh", action="store_true",
+                    help="ignore any existing weights checkpoint; start over")
     args = ap.parse_args()
 
     seeds = ([int(s) for s in args.seeds.split(",")] if args.seeds
              else load_train_seeds())
-    n_eps_total = len(seeds) * args.episodes_per_seed
-    print(f"[train] {len(seeds)} seeds × {args.episodes_per_seed} eps = {n_eps_total} total episodes")
+    N = len(seeds)
+    n_rounds = args.episodes_per_seed
+    n_eps_total = N * n_rounds
+    print(f"[train] {N} seeds × {n_rounds} rounds = {n_eps_total} total episodes "
+          f"(parallel, 10 worlds × 1 bot)")
 
-    # Prereq check: cubiomes-derived npz for every train seed.
+    # Prereq: cubiomes-derived npz for every train seed.
     for s in seeds:
         if not (ROOT / "data" / f"biomes_{s}.npz").exists():
             sys.exit(f"missing data/biomes_{s}.npz — run "
                      f"`python3 tools/extract_biomes.py --seed {s}` first")
 
     LOGS.mkdir(exist_ok=True)
-    agent = LinearQ(alpha=args.alpha, gamma=args.gamma,
-                    epsilon_decay_episodes=n_eps_total // 2)
 
-    ep_global = 0
-    for seed in seeds:
-        dst = stage_server_dir(seed, TRAIN_PORT, max_bot_id=args.episodes_per_seed - 1)
+    # Resume from checkpoint if present.
+    rounds_completed = 0
+    if args.weights_out.exists() and not args.fresh:
+        agent, rounds_completed = load_checkpoint(
+            args.weights_out, args.alpha, args.gamma, n_eps_total // 2)
+        print(f"[resume] loaded checkpoint: ε={agent.epsilon:.3f} "
+              f"rounds_completed={rounds_completed}/{n_rounds}")
+        if rounds_completed >= n_rounds:
+            print(f"[complete] all rounds already done. Use --fresh to retrain.")
+            return
+    else:
+        agent = LinearQ(alpha=args.alpha, gamma=args.gamma,
+                        epsilon_decay_episodes=n_eps_total // 2)
+        print(f"[fresh] new agent ε={agent.epsilon:.3f}")
+
+    # Stage + boot all 10 servers (parallel).
+    print(f"[stage] {N} server dirs ({HEAP_GB} GB heap each, {N * HEAP_GB} GB total)")
+    servers: list[tuple[int, int, Path]] = []
+    for i, seed in enumerate(seeds):
+        port = TRAIN_PORT_BASE + i
+        bot_id = i
+        dst = stage_server_dir(seed, port, bot_id=bot_id)
+        servers.append((seed, port, dst))
+
+    print(f"[boot] booting {N} Paper servers in parallel")
+    for seed, port, dst in servers:
         log = LOGS / f"train_server_{seed}.log"
-        print(f"[server] booting seed={seed}")
-        server_proc = spawn(
-            ["java", "-Xmx4G", "-Xms1G", "-jar", "paper.jar", "nogui"],
-            log, cwd=dst)
-        try:
-            wait_for_done(log, f"train server seed={seed}")
-            view = NpzWorldView(seed)
+        spawn(["java", f"-Xmx{HEAP_GB}G", "-Xms512M", "-jar", "paper.jar", "nogui"],
+              log, cwd=dst)
+    for seed, _, _ in servers:
+        wait_for_done(LOGS / f"train_server_{seed}.log", f"server seed={seed}")
+    print(f"[ready] all {N} servers up")
 
-            for ep in range(args.episodes_per_seed):
-                bot_id = ep
-                bot_port = BOT_PORT_BASE + bot_id
+    try:
+        for round_idx in range(rounds_completed, n_rounds):
+            print(f"\n[round {round_idx+1}/{n_rounds}] starting "
+                  f"({time.strftime('%H:%M:%S')})")
+
+            # Spawn fresh bots (one per server). Sequential spawn but quick.
+            bot_procs = []
+            for i, (seed, port, _) in enumerate(servers):
+                bot_id = i
                 env_vars = os.environ.copy()
-                env_vars["MC_PORT"] = str(TRAIN_PORT)
-                env_vars["DISPERSE_N"] = str(args.episodes_per_seed)
-                bot_log = LOGS / f"train_bot_{seed}_{ep}.log"
-                bot_proc = spawn(
+                env_vars["MC_PORT"] = str(port)
+                env_vars["DISPERSE_N"] = "1"  # single bot per world — no dispersal
+                bot_log = LOGS / f"train_bot_{seed}_r{round_idx}.log"
+                bot_procs.append(spawn(
                     ["node", "bot/bridge.js", str(bot_id)],
-                    bot_log, env=env_vars, cwd=ROOT)
-                print(f"[bot] seed={seed} ep={ep} bot_id={bot_id}, settling {BOT_SETTLE_S}s")
-                time.sleep(BOT_SETTLE_S)
-                try:
-                    env = connect_env(bot_port, view, args.budget_s + 60)
-                    metrics = run_train_episode(env, agent, args.budget_s)
-                    env.close()
-                    print(f"[ep] seed={seed} ep={ep:>2} "
-                          f"reward={metrics['reward']:+.2f} steps={metrics['steps']:>3} "
-                          f"stuck={metrics['stuck']:>2} biomes={metrics['unique_biomes']} "
-                          f"ε={agent.epsilon:.3f}")
-                finally:
-                    reap(bot_proc)
+                    bot_log, env=env_vars, cwd=ROOT))
+                time.sleep(0.3)
+            print(f"[bots] {N} bots spawning; settling {BOT_SETTLE_S}s")
+            time.sleep(BOT_SETTLE_S)
 
-                agent.decay_epsilon(ep_global)
-                ep_global += 1
-                if not args.no_save:
-                    agent.save(args.weights_out)
-        finally:
-            reap(server_proc)
+            # Connect 10 Envs, start 10 threads (one episode each).
+            results: dict[int, dict] = {}
+            threads: list[threading.Thread] = []
+            envs: list[Env] = []
+            for i, (seed, _, _) in enumerate(servers):
+                try:
+                    view = NpzWorldView(seed)
+                    env = connect_env(BOT_PORT_BASE + i, view, args.budget_s + 60)
+                    envs.append(env)
+                    t = threading.Thread(
+                        target=run_episode_thread,
+                        args=(env, agent, args.budget_s, seed, results),
+                        name=f"ep-seed{seed}")
+                    t.start()
+                    threads.append(t)
+                except Exception as e:
+                    print(f"[ep] seed={seed} FAILED to start: {e}")
+                    results[seed] = {"ok": False, "error": str(e)}
+
+            for t in threads:
+                t.join()
+            for env in envs:
+                try: env.close()
+                except Exception: pass
+
+            # Per-seed result lines.
+            for seed in seeds:
+                res = results.get(seed, {"ok": False, "error": "no result"})
+                if res["ok"]:
+                    print(f"[ep] seed={seed} round={round_idx} "
+                          f"reward={res['reward']:+.2f} steps={res['steps']:>3} "
+                          f"stuck={res['stuck']:>2} biomes={res['unique_biomes']}")
+                else:
+                    print(f"[ep] seed={seed} round={round_idx} ERROR: {res['error']}")
+
+            # Kill bots; persist; decay ε.
+            for p in bot_procs:
+                reap(p)
+            rounds_completed = round_idx + 1
+            agent.decay_epsilon(rounds_completed * N - 1)
+            print(f"[checkpoint] round {round_idx+1} done; ε={agent.epsilon:.3f}")
+            if not args.no_save:
+                save_checkpoint(agent, rounds_completed, args.weights_out)
+                print(f"[saved] {args.weights_out}")
+    finally:
+        for seed, _, dst in servers:
+            for p in PROCS[:]:
+                if p.poll() is None:
+                    reap(p)
             if args.cleanup:
                 shutil.rmtree(dst, ignore_errors=True)
 
