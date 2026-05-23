@@ -27,8 +27,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SEEDS = [123, 456, 789]
-POLICIES = ["frontier"]
-BOTS_PER_SERVER = 3
+POLICIES = ["random", "frontier"]
+BOTS_PER_SERVER = 10
 BUDGET_S = 300
 BASE_MC_PORT = 25565
 SETTLE_S = 35
@@ -138,7 +138,7 @@ def main() -> None:
     for seed, _, d in servers:
         log = LOGS / f"server_{seed}.log"
         print(f"[server] booting {d.name}")
-        spawn(["java", "-Xmx4G", "-Xms1G", "-jar", "paper.jar", "nogui"],
+        spawn(["java", "-Xmx6G", "-Xms2G", "-jar", "paper.jar", "nogui"],
               log, cwd=d)
     for seed, _, _ in servers:
         wait_for_done(LOGS / f"server_{seed}.log", f"server {seed}")
