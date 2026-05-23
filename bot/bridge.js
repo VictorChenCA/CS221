@@ -161,7 +161,7 @@ function executeAction({ theta, distance }, cb) {
   const startBiomeId = bot.world.getBiome({ x: sx, y: sy, z: sz });
   const startBiome = mcData.biomes[startBiomeId]?.name ?? 'unknown';
   const t0 = Date.now();
-  const goal = new GoalNearXZ(tx, tz, 3);
+  const goal = new GoalNearXZ(tx, tz, 16);
   bot.pathfinder.setGoal(goal, false);
 
   let done = false;
