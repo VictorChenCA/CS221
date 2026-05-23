@@ -170,3 +170,24 @@ seeds.txt              Train (10) / test (3) seed split
 
 - `25565` — Minecraft server
 - `9000`–`9009` — one per bot bridge (up to 10 bots)
+
+## Results so far
+
+Test seeds `{123, 456, 789}`, 3 episodes per (policy, seed), 5-min budget,
+3 bots × 3 servers in parallel via `tools/run_test_eval.py`. Primary
+metric is mean unique biomes discovered per episode (proposal §3).
+
+| Policy                              | n | ub mean | ub sd | ub max |
+|-------------------------------------|---|---------|-------|--------|
+| Random walk                         | 9 | 3.33    | 1.41  | 5      |
+| Frontier — largest sector (initial) | 9 | 3.00    | 1.66  | 6      |
+| Frontier — closest cell             | 9 | 2.44    | 1.42  | 5      |
+| **Frontier — cluster + centroid (Yamauchi-faithful)** | **9** | **3.44** | **1.01** | **5** |
+
+The cluster-centroid variant matches Yamauchi (1997) most closely: novel
+cells are 4-connected flood-filled into clusters, clusters smaller than
+3 cells are dropped (noise filter), and the bot moves toward the cluster
+with the centroid closest to it. Beats random on 2 of 3 seeds and has
+the lowest variance of any baseline.
+
+Q-learning, oracle, and line-of-sight settings still pending.
