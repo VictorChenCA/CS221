@@ -78,10 +78,15 @@ class LinearQ:
 
 
 def compute_reward(prev_obs: dict, obs: dict) -> float:
-    """Reward function (milestone): +1 per new biome, -0.1 stuck, -0.01 step."""
+    """Reward: +1 per new biome, -0.03 stuck, -0.005 step.
+
+    Penalties were originally -0.1 stuck / -0.01 step, but training showed
+    the agent over-optimized for avoidance: stuck rate dropped 2× but biome
+    discovery did not improve. Lowering penalty magnitudes lets the +1
+    discovery signal dominate the gradient again."""
     delta = int(obs.get("numVisited", 0)) - int(prev_obs.get("numVisited", 0))
     r = float(delta)
     if obs.get("stuck"):
-        r -= 0.1
-    r -= 0.01
+        r -= 0.03
+    r -= 0.005
     return r

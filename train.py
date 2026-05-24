@@ -268,9 +268,14 @@ def main() -> None:
 
     # Resume from checkpoint if present.
     rounds_completed = 0
+    # Decay ε over almost the whole run so the agent doesn't go fully greedy
+    # before it has seen enough variety. Keep last ~10% greedy for stable
+    # final Q updates.
+    eps_decay_eps = max(1, int(n_eps_total * 0.9))
+
     if args.weights_out.exists() and not args.fresh:
         agent, rounds_completed = load_checkpoint(
-            args.weights_out, args.alpha, args.gamma, n_eps_total // 2)
+            args.weights_out, args.alpha, args.gamma, eps_decay_eps)
         print(f"[resume] loaded checkpoint: ε={agent.epsilon:.3f} "
               f"rounds_completed={rounds_completed}/{n_rounds}")
         if rounds_completed >= n_rounds:
@@ -278,8 +283,9 @@ def main() -> None:
             return
     else:
         agent = LinearQ(alpha=args.alpha, gamma=args.gamma,
-                        epsilon_decay_episodes=n_eps_total // 2)
-        print(f"[fresh] new agent ε={agent.epsilon:.3f}")
+                        epsilon_decay_episodes=eps_decay_eps)
+        print(f"[fresh] new agent ε={agent.epsilon:.3f} "
+              f"(decays over {eps_decay_eps} of {n_eps_total} episodes)")
 
     # Stage + boot all 10 servers (parallel).
     print(f"[stage] {N} server dirs ({HEAP_GB} GB heap each, {N * HEAP_GB} GB total)")
