@@ -125,12 +125,24 @@ def spawn(cmd: list[str], log: Path, *, env=None, cwd=None) -> subprocess.Popen:
 
 
 def main() -> None:
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--policies", type=str, default=",".join(POLICIES),
+                    help="comma-separated policies to eval (random/frontier/qlearn/oracle)")
+    ap.add_argument("--weights", type=str, default="weights/qlearn.npz",
+                    help="qlearn weights path (only used when 'qlearn' is in --policies)")
+    args = ap.parse_args()
+    policies = [p.strip() for p in args.policies.split(",") if p.strip()]
+
     LOGS.mkdir(exist_ok=True)
 
     for s in SEEDS:
         if not (ROOT / "data" / f"biomes_{s}.npz").exists():
             sys.exit(f"missing data/biomes_{s}.npz — run "
                      f"`python3 tools/extract_biomes.py --seed {s}` first")
+    if "qlearn" in policies and not (ROOT / args.weights).exists():
+        sys.exit(f"--policies includes 'qlearn' but {args.weights} doesn't exist. "
+                 f"Train first with `python3 train.py`.")
 
     n_bots_total = len(SEEDS) * BOTS_PER_SERVER
     servers = []
@@ -168,7 +180,7 @@ def main() -> None:
     print(f"[bots] {n_bots} bridges spawning; settling {SETTLE_S} s")
     time.sleep(SETTLE_S)
 
-    for policy in POLICIES:
+    for policy in policies:
         print(f"[run] policy={policy} start={time.strftime('%H:%M:%S')}")
         evals: list[subprocess.Popen] = []
         for s_idx, (seed, _, _) in enumerate(servers):
@@ -176,11 +188,12 @@ def main() -> None:
                 bot_id = s_idx * BOTS_PER_SERVER + b
                 episode = b + EPISODE_OFFSET
                 log = LOGS / f"eval_{policy}_{seed}_{episode}.log"
-                evals.append(spawn(
-                    [sys.executable, "eval.py", "--policy", policy,
-                     "--seed", str(seed), "--bot-id", str(bot_id),
-                     "--episode", str(episode), "--budget-s", str(BUDGET_S)],
-                    log, cwd=ROOT))
+                cmd = [sys.executable, "eval.py", "--policy", policy,
+                       "--seed", str(seed), "--bot-id", str(bot_id),
+                       "--episode", str(episode), "--budget-s", str(BUDGET_S)]
+                if policy == "qlearn":
+                    cmd += ["--weights", args.weights]
+                evals.append(spawn(cmd, log, cwd=ROOT))
         for p in evals:
             p.wait()
         print(f"[done] policy={policy} end={time.strftime('%H:%M:%S')}")
