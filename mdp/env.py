@@ -20,7 +20,7 @@ import socket
 from mdp.world import NpzWorldView
 
 NUM_ACTIONS = 8
-DEFAULT_DISTANCE = 100
+DEFAULT_DISTANCE = 50
 DEFAULT_GRID_RADIUS = 128  # cells = 32 chunks (1 chunk = 16 blocks = 4 cells)
 
 
