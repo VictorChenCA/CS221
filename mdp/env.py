@@ -45,6 +45,14 @@ class Env:
     def step(self, action: int) -> dict:
         return self.step_raw(action_to_theta(action), self.distance)
 
+    def observe(self) -> dict:
+        """Read the current obs without moving the bot.
+
+        The bridge treats `distance=0` as a no-op that just runs `getObs`
+        and returns immediately — so this skips the ~5–30s pathfinder run
+        a regular `step` would burn. Useful for episode warmup."""
+        return self.step_raw(0.0, 0)
+
     def step_raw(self, theta_deg: float, distance_blocks: int) -> dict:
         """Send a single (theta, distance) hop. Used by the oracle path,
         which carries exact distances rather than compass indices."""

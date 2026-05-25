@@ -196,7 +196,7 @@ def run_episode_thread(env: Env, agent: LinearQ, budget_s: float,
     """One worker thread: drive `env` under ε-greedy for `budget_s` seconds,
     TD-update shared `agent.W` after every step (W_LOCK-guarded)."""
     try:
-        prev = env.step(0)
+        prev = env.observe()
         t0 = time.monotonic()
         n_steps = 0; n_stuck = 0; total_r = 0.0
         biomes_at_start = int(prev.get("numVisited", 0))

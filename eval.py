@@ -49,7 +49,7 @@ def run_policy_episode(env: Env, policy, budget_s: float) -> list[dict]:
     bot has been kicked, so further actions only burn wall-clock waiting
     for stale-state pathfinder timeouts."""
     policy.reset()
-    trail = [env.step(0)]  # warm-up obs to learn current biome
+    trail = [env.observe()]  # warmup: no-op observe (no pathfinder run)
     if trail[-1].get("dead"):
         print(f"[eval] bot dead at warmup: {trail[-1].get('reason')}")
         return trail
@@ -68,7 +68,7 @@ def run_oracle_episode(env: Env, seed: int, radius_cells: int,
                        budget_s: float) -> list[dict]:
     """Plan offline from start_cell, replay hops through the bridge."""
     from mdp import oracle  # local: keep numpy out of the policy path
-    warmup = env.step(0)
+    warmup = env.observe()
     start_cell = (warmup["cellX"], warmup["cellZ"])
     plan = oracle.plan(seed=seed, start_cell=start_cell,
                        radius_cells=radius_cells, time_budget_s=budget_s)
