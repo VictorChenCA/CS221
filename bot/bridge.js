@@ -53,11 +53,23 @@ bot.loadPlugin(pathfinder);
 bot.visitedBiomes = new Set();
 
 bot.once('spawn', () => {
-  // canDig=true lets the bot break leaves/wood to escape canopy if it
-  // lands on a tree after the Y=250 disperse fall.
+  // Expanded Movements config — see stuck-cause analysis. canDig lets
+  // pathfinder break leaves/wood; canPlace + scafoldingBlocks lets it
+  // bridge gaps and climb walls (needs blocks in inventory; we /give
+  // some below). maxDropDown set to 256 — fallDamage is off, so deep
+  // drops are free. canOpenDoors keeps villages/structures traversable.
   const moves = new Movements(bot);
   moves.canDig = true;
-  moves.maxDropDown = 8;
+  moves.canPlace = true;
+  moves.canOpenDoors = true;
+  moves.maxDropDown = 256;
+  moves.allow1by1towers = true;
+  if (bot.registry && bot.registry.blocksByName) {
+    moves.scafoldingBlocks = [
+      bot.registry.blocksByName.dirt.id,
+      bot.registry.blocksByName.cobblestone.id,
+    ];
+  }
   bot.pathfinder.setMovements(moves);
   // Disperse on a DISPERSE_R-block circle (proposal §6). The /tp
   // command needs op — see tools/run_test_eval.py which writes ops.json.
@@ -69,6 +81,11 @@ bot.once('spawn', () => {
   // Disable fall damage so the bot survives the 180-block plunge from
   // Y=250. Idempotent; harmless if a peer bot already set it.
   bot.chat('/gamerule fallDamage false');
+  // Survival kit: blocks for bridging/tower-up + ladders for climbing.
+  // Bot is op (ops.json) so /give works.
+  bot.chat('/give @s minecraft:dirt 256');
+  bot.chat('/give @s minecraft:cobblestone 256');
+  bot.chat('/give @s minecraft:ladder 64');
   // Y=250 above any terrain; bot falls to surface (needs
   // allow-flight=true to tolerate the brief airborne phase).
   bot.chat(`/tp ${tx} 250 ${tz}`);
