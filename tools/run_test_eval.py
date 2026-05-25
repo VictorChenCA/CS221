@@ -27,7 +27,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SEEDS = [123, 456, 789]
-POLICIES = ["random", "frontier"]
+POLICIES = ["random", "frontier", "oracle"]
 BOTS_PER_SERVER = 5
 BUDGET_S = 600
 # Lets us stack episodes across sequential runs of this driver:

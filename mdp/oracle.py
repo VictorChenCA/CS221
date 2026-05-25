@@ -9,20 +9,11 @@ policies use.
 
 Algorithm (greedy orienteering / set-cover):
   1. Scan biome_at over the (2R+1)x(2R+1) cell window around start.
-  2. Group cells by biome id; for each biome (other than the starting
-     one) keep the cell nearest to start — that's the candidate target.
-  3. Greedy loop: from the current position, pick the unvisited biome
-     whose target is cheapest to reach. Append the hop, update position,
-     mark visited. Stop when no remaining hop fits in the budget.
-  4. Snap each (dx, dz) vector to the bridge's 8-way compass action.
-
-This is a 1-(1/e) approximation to weighted orienteering when the
-"reward" is uniform set coverage, which is the case here. Tractable for
-10-minute budgets at the radii we use.
-
-Biome data comes from `NpzWorldView(seed)` (mdp/world.py), which reads
-a pre-extracted dump from `data/biomes_<seed>.npz`. Generate that file
-once per seed via `python3 tools/extract_biomes.py --seed N`.
+  2. Group cells by biome id.
+  3. Greedily choose the nearest unvisited biome from the CURRENT
+     position.
+  4. Break long paths into smaller macro-hops that match the actual
+     action space used by RL/baselines.
 """
 
 import math
@@ -32,11 +23,16 @@ from typing import Callable
 from mdp.env import NUM_ACTIONS
 from mdp.world import CELL_BLOCKS, NpzWorldView
 
-# Empirical pathfinder speed under sprint+jump. Re-measure once the
-# bridge is profiled; conservative estimate for budgeting.
+# Conservative real-world movement estimate for Mineflayer movement.
 WALK_SPEED_BPS = 4.3
 
-BiomeFn = Callable[[int, int], int]  # (cellX, cellZ) -> biome id (or -1 = unknown)
+# Match the actual macro-action scale used by the project.
+MAX_HOP_BLOCKS = 50
+
+# Pathfinding is never perfectly straight in Minecraft.
+PATH_EFFICIENCY_PENALTY = 1.5
+
+BiomeFn = Callable[[int, int], int]
 
 
 @dataclass
@@ -48,7 +44,7 @@ class Hop:
 @dataclass
 class Plan:
     hops: list[Hop]
-    expected_biomes: list[int]  # in visit order, including the starting biome
+    expected_biomes: list[int]
 
 
 def plan(
@@ -58,68 +54,161 @@ def plan(
     time_budget_s: float,
     biome_at: BiomeFn | None = None,
 ) -> Plan:
-    """Greedy orienteering plan. See module docstring for the algorithm."""
+    """Greedy biome-coverage oracle."""
+
     if biome_at is None:
         biome_at = NpzWorldView(seed).biome_at
 
     sx, sz = start_cell
 
-    # Step 1: scan the window, group cells by biome.
+    # ------------------------------------------------------------
+    # Scan biome window around spawn/current location.
+    # ------------------------------------------------------------
+
     biome_cells: dict[int, list[tuple[int, int]]] = {}
+
     for dz in range(-radius_cells, radius_cells + 1):
         for dx in range(-radius_cells, radius_cells + 1):
-            cx, cz = sx + dx, sz + dz
+            cx = sx + dx
+            cz = sz + dz
+
             b = biome_at(cx, cz)
+
             if b < 0:
                 continue
+
             biome_cells.setdefault(b, []).append((cx, cz))
 
     start_biome = biome_at(sx, sz)
 
-    # Step 2: collapse each biome to its closest representative cell.
-    targets: dict[int, tuple[int, int]] = {}
-    for b, cells in biome_cells.items():
-        if b == start_biome:
-            continue
-        targets[b] = min(cells, key=lambda c: _block_dist(start_cell, c))
+    # Remove starting biome from targets.
+    if start_biome in biome_cells:
+        del biome_cells[start_biome]
 
-    # Step 3: greedy hop loop under the time budget.
+    # ------------------------------------------------------------
+    # Greedy coverage loop.
+    # ------------------------------------------------------------
+
     hops: list[Hop] = []
-    visited: list[int] = [start_biome] if start_biome >= 0 else []
+
+    visited_biomes: list[int] = []
+
+    if start_biome >= 0:
+        visited_biomes.append(start_biome)
+
     cur = (sx, sz)
+
     time_used = 0.0
 
-    while targets:
-        b, tgt = min(targets.items(), key=lambda kv: _block_dist(cur, kv[1]))
-        dist_blocks = _block_dist(cur, tgt)
-        travel_s = dist_blocks / WALK_SPEED_BPS
+    while biome_cells:
+
+        best_biome = None
+        best_cell = None
+        best_dist = float("inf")
+
+        # --------------------------------------------------------
+        # Choose nearest remaining biome from CURRENT position.
+        # --------------------------------------------------------
+
+        for biome_id, cells in biome_cells.items():
+
+            nearest_cell = min(
+                cells,
+                key=lambda c: _block_dist(cur, c)
+            )
+
+            dist = _block_dist(cur, nearest_cell)
+
+            if dist < best_dist:
+                best_dist = dist
+                best_biome = biome_id
+                best_cell = nearest_cell
+
+        if best_cell is None:
+            break
+
+        # --------------------------------------------------------
+        # Estimate realistic Minecraft travel time.
+        # --------------------------------------------------------
+
+        travel_s = (
+            PATH_EFFICIENCY_PENALTY
+            * best_dist
+            / WALK_SPEED_BPS
+        )
+
         if time_used + travel_s > time_budget_s:
             break
-        dx_b = (tgt[0] - cur[0]) * CELL_BLOCKS
-        dz_b = (tgt[1] - cur[1]) * CELL_BLOCKS
-        hops.append(_snap_to_compass(dx_b, dz_b))
-        visited.append(b)
-        cur = tgt
+
+        # --------------------------------------------------------
+        # Convert target vector into multiple smaller hops.
+        # --------------------------------------------------------
+
+        dx_total = (best_cell[0] - cur[0]) * CELL_BLOCKS
+        dz_total = (best_cell[1] - cur[1]) * CELL_BLOCKS
+
+        remaining = math.hypot(dx_total, dz_total)
+
+        while remaining > 1:
+
+            step_dist = min(MAX_HOP_BLOCKS, remaining)
+
+            scale = step_dist / remaining
+
+            step_dx = dx_total * scale
+            step_dz = dz_total * scale
+
+            hops.append(
+                _snap_to_compass(step_dx, step_dz)
+            )
+
+            dx_total -= step_dx
+            dz_total -= step_dz
+
+            remaining = math.hypot(dx_total, dz_total)
+
+        visited_biomes.append(best_biome)
+
+        cur = best_cell
+
         time_used += travel_s
-        del targets[b]
 
-    return Plan(hops=hops, expected_biomes=visited)
+        del biome_cells[best_biome]
+
+    return Plan(
+        hops=hops,
+        expected_biomes=visited_biomes,
+    )
 
 
-def _block_dist(a: tuple[int, int], b: tuple[int, int]) -> float:
-    return math.hypot((a[0] - b[0]) * CELL_BLOCKS, (a[1] - b[1]) * CELL_BLOCKS)
+def _block_dist(
+    a: tuple[int, int],
+    b: tuple[int, int],
+) -> float:
+
+    return math.hypot(
+        (a[0] - b[0]) * CELL_BLOCKS,
+        (a[1] - b[1]) * CELL_BLOCKS,
+    )
 
 
 def _snap_to_compass(dx: float, dz: float) -> Hop:
-    """Convert a free (dx, dz) vector in blocks to the nearest 8-way hop.
+    """Snap arbitrary vector to nearest 8-way action."""
 
-    The bridge accepts (theta_deg, distance_blocks); theta is measured
-    clockwise from +z (north), matching `mdp/env.py::action_to_theta`.
-    """
     distance = int(round(math.hypot(dx, dz)))
-    theta = (math.degrees(math.atan2(dx, dz)) + 360.0) % 360.0
+
+    theta = (
+        math.degrees(math.atan2(dx, dz))
+        + 360.0
+    ) % 360.0
+
     step = 360.0 / NUM_ACTIONS
-    theta_snapped = round(theta / step) * step % 360.0
-    return Hop(theta_deg=theta_snapped, distance_blocks=distance)
 
+    theta_snapped = (
+        round(theta / step) * step
+    ) % 360.0
 
+    return Hop(
+        theta_deg=theta_snapped,
+        distance_blocks=distance,
+    )
