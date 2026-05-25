@@ -166,23 +166,43 @@ def main() -> None:
         print(f"  seed={seed}  ->  localhost:{port}")
     print()
 
-    n_bots = 0
-    for s_idx, (_, port, _) in enumerate(servers):
-        for b in range(BOTS_PER_SERVER):
-            bot_id = s_idx * BOTS_PER_SERVER + b
-            env = os.environ.copy()
-            env["MC_PORT"] = str(port)
-            env["DISPERSE_N"] = str(BOTS_PER_SERVER)
-            spawn(["node", "bot/bridge.js", str(bot_id)],
-                  LOGS / f"bot_{bot_id}.log", env=env, cwd=ROOT)
-            n_bots += 1
-            time.sleep(0.5)
-    # Each bot takes SPAWN_CHUNK_WAIT_MS + DISPERSE_WAIT_MS (=5s) plus
-    # connect time before it can take an action; pad to 15s to be safe.
-    print(f"[bots] {n_bots} bridges spawning; settling {SETTLE_S} s")
-    time.sleep(SETTLE_S)
+    bot_procs: list[subprocess.Popen] = []
 
-    for policy in policies:
+    def spawn_all_bots(policy_tag: str) -> None:
+        """Spawn one bot bridge per (server, slot). Tag logs by policy so
+        bots from a later policy don't clobber the prior policy's logs."""
+        bot_procs.clear()
+        for s_idx, (_, port, _) in enumerate(servers):
+            for b in range(BOTS_PER_SERVER):
+                bot_id = s_idx * BOTS_PER_SERVER + b
+                env = os.environ.copy()
+                env["MC_PORT"] = str(port)
+                env["DISPERSE_N"] = str(BOTS_PER_SERVER)
+                p = spawn(["node", "bot/bridge.js", str(bot_id)],
+                          LOGS / f"bot_{policy_tag}_{bot_id}.log",
+                          env=env, cwd=ROOT)
+                bot_procs.append(p)
+                time.sleep(0.5)
+        print(f"[bots] {len(bot_procs)} bridges spawning ({policy_tag}); "
+              f"settling {SETTLE_S} s")
+        time.sleep(SETTLE_S)
+
+    def kill_all_bots() -> None:
+        """Terminate every bridge so the next policy gets fresh bots
+        (last policy's kicks don't carry over)."""
+        for p in bot_procs:
+            if p.poll() is None:
+                p.terminate()
+        for p in bot_procs:
+            try:
+                p.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                p.kill()
+        # Bridges hold TCP listeners; give the OS a moment to free ports.
+        time.sleep(3)
+
+    for policy_idx, policy in enumerate(policies):
+        spawn_all_bots(policy)
         print(f"[run] policy={policy} start={time.strftime('%H:%M:%S')}")
         evals: list[subprocess.Popen] = []
         for s_idx, (seed, _, _) in enumerate(servers):
@@ -199,6 +219,7 @@ def main() -> None:
         for p in evals:
             p.wait()
         print(f"[done] policy={policy} end={time.strftime('%H:%M:%S')}")
+        kill_all_bots()
 
     n_results = len(list((ROOT / "results").glob("*.json"))) if (ROOT / "results").exists() else 0
     print(f"[complete] {n_results} result files in results/")
