@@ -16,6 +16,7 @@ const net = require('net');
 const mineflayer = require('mineflayer');
 const { pathfinder, Movements, goals: { GoalNearXZ } } = require('mineflayer-pathfinder');
 const mcData = require('minecraft-data')('1.20.1');
+const { Vec3 } = require('vec3');
 
 const ID = parseInt(process.argv[2] || '0', 10);
 const HOST = process.env.MC_HOST || 'localhost';
@@ -153,6 +154,43 @@ function getObs() {
 const ACTION_TIMEOUT_MS = 30000;
 const BIOME_SAMPLE_MS = 1000;  // 20 ticks; biome cells are 4 blocks wide
 
+// When an action returns STUCK, dump the immediate terrain around the
+// bot so we can grep / aggregate the actual reasons mineflayer-pathfinder
+// is giving up. Logs as a single grep-able line:
+//   [stuck-detail bot=N] theta=θ feet=X feet_below=Y head=Z front_feet=A
+//     front_head=B front_above=C front_below=D onGround=bool inWater=bool
+//     health=H/20 food=F/20 inv=hand_block (count)
+// Where "front_*" probes one cell in the requested compass direction at
+// foot / head / above-head / below-foot y-levels — enough to identify
+// the canonical stuck causes (wall, ledge, leaves, water, lava).
+function logStuckTerrain(theta, sx, sy, sz) {
+  const rad = (theta * Math.PI) / 180;
+  const dx = Math.round(Math.sin(rad));
+  const dz = Math.round(Math.cos(rad));
+  const fx = sx + dx, fz = sz + dz;
+  const nameAt = (x, y, z) => {
+    const b = bot.blockAt(new Vec3(x, y, z));
+    return b ? b.name : 'unloaded';
+  };
+  const p = bot.entity && bot.entity.position;
+  const inWater = !!(bot.entity && (bot.entity.isInWater || bot.entity.isInLava));
+  const onGround = bot.entity ? !!bot.entity.onGround : false;
+  const heldItem = bot.heldItem ? `${bot.heldItem.name}(${bot.heldItem.count})` : 'none';
+  console.log(
+    `[stuck-detail bot=${ID}] theta=${theta.toFixed(0)} ` +
+    `feet=${nameAt(sx, sy, sz)} ` +
+    `feet_below=${nameAt(sx, sy - 1, sz)} ` +
+    `head=${nameAt(sx, sy + 1, sz)} ` +
+    `front_feet=${nameAt(fx, sy, fz)} ` +
+    `front_head=${nameAt(fx, sy + 1, fz)} ` +
+    `front_above=${nameAt(fx, sy + 2, fz)} ` +
+    `front_below=${nameAt(fx, sy - 1, fz)} ` +
+    `onGround=${onGround} inWater=${inWater} ` +
+    `health=${(bot.health ?? 0).toFixed(0)}/20 food=${bot.food ?? 0}/20 ` +
+    `hand=${heldItem}`);
+}
+
+
 function executeAction({ theta, distance }, cb) {
   if (!distance) { cb(getObs()); return; }
   const rad = (theta * Math.PI) / 180;
@@ -199,6 +237,7 @@ function executeAction({ theta, distance }, cb) {
       `end=(${obs.x},${obs.z}) endBiome=${obs.biomeName} ` +
       `moved=${moved.toFixed(1)} dt=${dt}s samples=${midSamples} ` +
       `result=${stuck ? `STUCK:${reason}` : 'OK'}`);
+    if (stuck) logStuckTerrain(theta, sx, sy, sz);
     cb(obs);
   };
   const onReach = () => finish(false, 'reached');
