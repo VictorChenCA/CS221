@@ -16,12 +16,18 @@ bridge's grid is forwarded as-is.
 
 import json
 import socket
+import time
 
 from mdp.world import NpzWorldView
 
 NUM_ACTIONS = 8
 DEFAULT_DISTANCE = 50
 DEFAULT_GRID_RADIUS = 128  # cells = 32 chunks (1 chunk = 16 blocks = 4 cells)
+# How long to keep retrying ConnectionRefused before giving up. The bridge
+# only opens its TCP listener after the bot has spawned + dispersed +
+# landed, which can take >60s on cold-boot servers while chunk gen runs.
+CONNECT_RETRY_S = 120.0
+CONNECT_RETRY_DELAY_S = 2.0
 
 
 def action_to_theta(action: int) -> float:
@@ -38,7 +44,7 @@ class Env:
         self.distance = distance
         self.world_view = world_view
         self.grid_radius = grid_radius
-        self.sock = socket.create_connection((host, port), timeout=timeout)
+        self.sock = _connect_with_retry(host, port, timeout)
         self.sock.settimeout(timeout)
         self._buf = b""
 
@@ -95,3 +101,18 @@ class Env:
             self.sock.close()
         except OSError:
             pass
+
+
+def _connect_with_retry(host: str, port: int, sock_timeout: float) -> socket.socket:
+    """Retry on ConnectionRefused (bridge not yet listening) but propagate
+    other errors immediately. Cap total wait at CONNECT_RETRY_S."""
+    deadline = time.monotonic() + CONNECT_RETRY_S
+    last_err: Exception | None = None
+    while True:
+        try:
+            return socket.create_connection((host, port), timeout=sock_timeout)
+        except ConnectionRefusedError as e:
+            last_err = e
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(CONNECT_RETRY_DELAY_S)

@@ -35,7 +35,7 @@ BUDGET_S = 600
 # run 2 with EPISODE_OFFSET=5 writes ep ids 5..(BOTS_PER_SERVER-1+5), etc.
 EPISODE_OFFSET = int(os.environ.get("EPISODE_OFFSET", "0"))
 BASE_MC_PORT = 25565
-SETTLE_S = 35
+SETTLE_S = 90  # cold-boot chunk gen for 5 dispersal points takes 60-90s
 SERVER_READY_TIMEOUT_S = 360
 
 LOGS = ROOT / "logs"
