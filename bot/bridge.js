@@ -272,6 +272,21 @@ function executeAction({ theta, distance }, cb) {
          visitedBiomes: [...bot.visitedBiomes] });
     return;
   }
+  // bot.entity.position can go NaN locally without the server kicking
+  // (e.g. when our packet sanitizer drops an outbound NaN packet — we
+  // prevent the disconnect but the bot's local entity stays corrupted).
+  // Treat that as a dead bot so eval exits cleanly instead of letting
+  // pathfinder time out on NaN starts for the rest of the episode.
+  const ep = bot.entity && bot.entity.position;
+  if (!ep || !Number.isFinite(ep.x) || !Number.isFinite(ep.y) || !Number.isFinite(ep.z)) {
+    markDead('entity-position-NaN');
+    cb({ stuck: true, dead: true, reason: deadReason,
+         x: null, z: null, cellX: null, cellZ: null,
+         biomeId: -1, biomeName: 'unknown',
+         numVisited: bot.visitedBiomes.size,
+         visitedBiomes: [...bot.visitedBiomes] });
+    return;
+  }
   if (!distance) { cb(getObs()); return; }
   const actionIdx = actionCounter++;
   const rad = (theta * Math.PI) / 180;
