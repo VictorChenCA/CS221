@@ -90,6 +90,11 @@ bot.once('spawn', () => {
   moves.canOpenDoors = true;
   moves.maxDropDown = 256;
   moves.allow1by1towers = true;
+  // mineflayer-pathfinder default is 1. Bumping to 10 makes water 10×
+  // more expensive in A* so the planner prefers land routes (avoids
+  // the shore-spam-rejection failure mode where pathfinder rapidly
+  // returns noPath for every direction over sand/water).
+  moves.liquidCost = 10;
   if (bot.registry && bot.registry.blocksByName) {
     moves.scafoldingBlocks = [
       bot.registry.blocksByName.dirt.id,
