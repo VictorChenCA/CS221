@@ -43,13 +43,24 @@ def make_policy(name: str, seed: int):
 
 
 def run_policy_episode(env: Env, policy, budget_s: float) -> list[dict]:
-    """Step `policy` against `env` until budget elapses. Return obs trail."""
+    """Step `policy` against `env` until budget elapses. Return obs trail.
+
+    Exits early when the bridge reports `dead: true` — the underlying MC
+    bot has been kicked, so further actions only burn wall-clock waiting
+    for stale-state pathfinder timeouts."""
     policy.reset()
     trail = [env.step(0)]  # warm-up obs to learn current biome
+    if trail[-1].get("dead"):
+        print(f"[eval] bot dead at warmup: {trail[-1].get('reason')}")
+        return trail
     t0 = time.monotonic()
     while time.monotonic() - t0 < budget_s:
         action = policy.act(trail[-1])
-        trail.append(env.step(action))
+        obs = env.step(action)
+        trail.append(obs)
+        if obs.get("dead"):
+            print(f"[eval] bot dead after action {len(trail)-1}: {obs.get('reason')}")
+            break
     return trail
 
 

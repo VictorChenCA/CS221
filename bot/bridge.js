@@ -110,8 +110,22 @@ bot.once('spawn', () => {
   });
 });
 
-bot.on('error', (e) => console.error(`bot ${ID} error:`, e.message));
-bot.on('death', () => console.log(`bot ${ID} died`));
+// Dead-bot tracking — set on any disconnect signal so executeAction can
+// short-circuit instead of letting pathfinder time out on stale state.
+let isDead = false;
+let deadReason = null;
+function markDead(why) {
+  if (isDead) return;
+  isDead = true;
+  deadReason = why;
+  console.log(`[kicked bot=${ID} t=${nowHMS()}] reason=${why}`);
+}
+bot.on('error', (e) => {
+  console.log(`[bot-error bot=${ID} t=${nowHMS()}] ${e.message}`);
+});
+bot.on('death', () => console.log(`[bot-death bot=${ID} t=${nowHMS()}]`));
+bot.on('end', (reason) => markDead(`end:${reason || 'unknown'}`));
+bot.on('kicked', (reason) => markDead(`kicked:${reason}`));
 
 // Sample a (2r+1)x(2r+1) biome grid on a 4-block stride, centered on
 // the bot's current cell. Y is fixed to the bot's current Y — we only
@@ -216,6 +230,17 @@ function nowHMS() {
 }
 
 function executeAction({ theta, distance }, cb) {
+  // Bot is gone (kicked / disconnected) — return immediately so eval can
+  // exit early instead of waiting 30 s per action for pathfinder to give
+  // up on a stale entity.
+  if (isDead) {
+    cb({ stuck: true, dead: true, reason: deadReason,
+         x: null, z: null, cellX: null, cellZ: null,
+         biomeId: -1, biomeName: 'unknown',
+         numVisited: bot.visitedBiomes.size,
+         visitedBiomes: [...bot.visitedBiomes] });
+    return;
+  }
   if (!distance) { cb(getObs()); return; }
   const actionIdx = actionCounter++;
   const rad = (theta * Math.PI) / 180;
