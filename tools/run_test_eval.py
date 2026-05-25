@@ -36,7 +36,7 @@ BUDGET_S = 600
 EPISODE_OFFSET = int(os.environ.get("EPISODE_OFFSET", "0"))
 BASE_MC_PORT = 25565
 SETTLE_S = 35
-SERVER_READY_TIMEOUT_S = 180
+SERVER_READY_TIMEOUT_S = 360
 
 LOGS = ROOT / "logs"
 PROCS: list[subprocess.Popen] = []
