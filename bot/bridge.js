@@ -78,6 +78,53 @@ bot.on('inject_allowed', () => {
   };
 });
 
+// Aquatic biomes — if the bot lands here, the dispersal point is bad
+// (bot will be stuck swimming). We retry /tp to a different angle.
+const AQUATIC_BIOMES = new Set([
+  'ocean', 'river', 'deep_ocean', 'frozen_ocean', 'lukewarm_ocean',
+  'cold_ocean', 'frozen_river', 'warm_ocean', 'deep_lukewarm_ocean',
+  'deep_cold_ocean', 'deep_frozen_ocean',
+]);
+const MAX_DISPERSE_RETRIES = 3;
+
+function tryDisperse(attempt) {
+  // Each attempt rotates 45° around the dispersal circle. Same bot id
+  // → same starting angle for reproducibility; retries add a fixed
+  // rotation so we re-target a different sector of the world.
+  const localId = ID % DISPERSE_N;
+  const baseAngle = (localId / DISPERSE_N) * 2 * Math.PI;
+  const angle = baseAngle + attempt * (Math.PI / 4);
+  const tx = Math.round(Math.cos(angle) * DISPERSE_R);
+  const tz = Math.round(Math.sin(angle) * DISPERSE_R);
+  console.log(`bot ${ID} disperse attempt=${attempt} -> (${tx}, ${tz})`);
+  bot.chat(`/tp ${tx} 250 ${tz}`);
+  bot.once('forcedMove', () => {
+    const deadline = Date.now() + LAND_TIMEOUT_MS;
+    const waitLanded = () => {
+      if (bot.entity && bot.entity.onGround) {
+        const p = bot.entity.position;
+        const bid = bot.world.getBiome({
+          x: Math.floor(p.x), y: Math.floor(p.y), z: Math.floor(p.z),
+        });
+        const biomeName = mcData.biomes[bid]?.name ?? 'unknown';
+        const isAquatic = AQUATIC_BIOMES.has(biomeName);
+        console.log(`bot ${ID} landed at (${p.x.toFixed(0)}, ${p.y.toFixed(0)}, ${p.z.toFixed(0)}) biome=${biomeName}${isAquatic ? ' AQUATIC' : ''}`);
+        if (isAquatic && attempt < MAX_DISPERSE_RETRIES) {
+          tryDisperse(attempt + 1);
+        } else {
+          startServer();
+        }
+      } else if (Date.now() >= deadline) {
+        console.log(`bot ${ID} land timeout (attempt=${attempt}); opening bridge anyway`);
+        startServer();
+      } else {
+        setTimeout(waitLanded, 250);
+      }
+    };
+    setTimeout(waitLanded, 500);
+  });
+}
+
 bot.once('spawn', () => {
   // Expanded Movements config — see stuck-cause analysis. canDig lets
   // pathfinder break leaves/wood; canPlace + scafoldingBlocks lets it
@@ -91,9 +138,7 @@ bot.once('spawn', () => {
   moves.maxDropDown = 256;
   moves.allow1by1towers = true;
   // mineflayer-pathfinder default is 1. Bumping to 10 makes water 10×
-  // more expensive in A* so the planner prefers land routes (avoids
-  // the shore-spam-rejection failure mode where pathfinder rapidly
-  // returns noPath for every direction over sand/water).
+  // more expensive in A* so the planner prefers land routes.
   moves.liquidCost = 10;
   if (bot.registry && bot.registry.blocksByName) {
     moves.scafoldingBlocks = [
@@ -102,13 +147,7 @@ bot.once('spawn', () => {
     ];
   }
   bot.pathfinder.setMovements(moves);
-  // Disperse on a DISPERSE_R-block circle (proposal §6). The /tp
-  // command needs op — see tools/run_test_eval.py which writes ops.json.
-  const localId = ID % DISPERSE_N;
-  const angle = (localId / DISPERSE_N) * 2 * Math.PI;
-  const tx = Math.round(Math.cos(angle) * DISPERSE_R);
-  const tz = Math.round(Math.sin(angle) * DISPERSE_R);
-  console.log(`bot ${ID} spawned, dispersing to (${tx}, ${tz})`);
+  console.log(`bot ${ID} spawned`);
   // Disable fall damage so the bot survives the 180-block plunge from
   // Y=250. Idempotent; harmless if a peer bot already set it.
   bot.chat('/gamerule fallDamage false');
@@ -117,28 +156,7 @@ bot.once('spawn', () => {
   bot.chat('/give @s minecraft:dirt 256');
   bot.chat('/give @s minecraft:cobblestone 256');
   bot.chat('/give @s minecraft:ladder 64');
-  // Y=250 above any terrain; bot falls to surface (needs
-  // allow-flight=true to tolerate the brief airborne phase).
-  bot.chat(`/tp ${tx} 250 ${tz}`);
-  // Wait for the forced teleport, then poll until the bot is actually
-  // on the ground before opening the bridge — pathfinder commanding a
-  // mid-air bot produces "Invalid move player packet" kicks.
-  bot.once('forcedMove', () => {
-    const deadline = Date.now() + LAND_TIMEOUT_MS;
-    const waitLanded = () => {
-      if (bot.entity && bot.entity.onGround) {
-        const p = bot.entity.position;
-        console.log(`bot ${ID} landed at (${p.x.toFixed(0)}, ${p.y.toFixed(0)}, ${p.z.toFixed(0)})`);
-        startServer();
-      } else if (Date.now() >= deadline) {
-        console.log(`bot ${ID} land timeout; opening bridge anyway`);
-        startServer();
-      } else {
-        setTimeout(waitLanded, 250);
-      }
-    };
-    setTimeout(waitLanded, 500);  // grace period after forcedMove
-  });
+  tryDisperse(0);
 });
 
 // Dead-bot tracking — set on any disconnect signal so executeAction can
