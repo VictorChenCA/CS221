@@ -131,6 +131,8 @@ def main() -> None:
                     help="comma-separated policies to eval (random/frontier/qlearn/oracle)")
     ap.add_argument("--weights", type=str, default="weights/qlearn.npz",
                     help="qlearn weights path (only used when 'qlearn' is in --policies)")
+    ap.add_argument("--budget-s", type=int, default=BUDGET_S,
+                    help=f"episode budget seconds (default {BUDGET_S})")
     args = ap.parse_args()
     policies = [p.strip() for p in args.policies.split(",") if p.strip()]
 
@@ -190,7 +192,7 @@ def main() -> None:
                 log = LOGS / f"eval_{policy}_{seed}_{episode}.log"
                 cmd = [sys.executable, "eval.py", "--policy", policy,
                        "--seed", str(seed), "--bot-id", str(bot_id),
-                       "--episode", str(episode), "--budget-s", str(BUDGET_S)]
+                       "--episode", str(episode), "--budget-s", str(args.budget_s)]
                 if policy == "qlearn":
                     cmd += ["--weights", args.weights]
                 evals.append(spawn(cmd, log, cwd=ROOT))

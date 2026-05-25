@@ -163,7 +163,7 @@ const BIOME_SAMPLE_MS = 1000;  // 20 ticks; biome cells are 4 blocks wide
 // Where "front_*" probes one cell in the requested compass direction at
 // foot / head / above-head / below-foot y-levels — enough to identify
 // the canonical stuck causes (wall, ledge, leaves, water, lava).
-function logStuckTerrain(theta, sx, sy, sz) {
+function logStuckTerrain(theta, sx, sy, sz, actionIdx, tStart) {
   const rad = (theta * Math.PI) / 180;
   const dx = Math.round(Math.sin(rad));
   const dz = Math.round(Math.cos(rad));
@@ -172,12 +172,12 @@ function logStuckTerrain(theta, sx, sy, sz) {
     const b = bot.blockAt(new Vec3(x, y, z));
     return b ? b.name : 'unloaded';
   };
-  const p = bot.entity && bot.entity.position;
   const inWater = !!(bot.entity && (bot.entity.isInWater || bot.entity.isInLava));
   const onGround = bot.entity ? !!bot.entity.onGround : false;
   const heldItem = bot.heldItem ? `${bot.heldItem.name}(${bot.heldItem.count})` : 'none';
   console.log(
-    `[stuck-detail bot=${ID}] theta=${theta.toFixed(0)} ` +
+    `[stuck-detail bot=${ID} t=${tStart} a=${actionIdx}] ` +
+    `theta=${theta.toFixed(0)} ` +
     `feet=${nameAt(sx, sy, sz)} ` +
     `feet_below=${nameAt(sx, sy - 1, sz)} ` +
     `head=${nameAt(sx, sy + 1, sz)} ` +
@@ -191,8 +191,16 @@ function logStuckTerrain(theta, sx, sy, sz) {
 }
 
 
+let actionCounter = 0;
+
+function nowHMS() {
+  const d = new Date();
+  return d.toTimeString().slice(0, 8) + '.' + String(d.getMilliseconds()).padStart(3, '0');
+}
+
 function executeAction({ theta, distance }, cb) {
   if (!distance) { cb(getObs()); return; }
+  const actionIdx = actionCounter++;
   const rad = (theta * Math.PI) / 180;
   const p = bot.entity.position;
   const sx = Math.floor(p.x), sy = Math.floor(p.y), sz = Math.floor(p.z);
@@ -201,6 +209,7 @@ function executeAction({ theta, distance }, cb) {
   const startBiomeId = bot.world.getBiome({ x: sx, y: sy, z: sz });
   const startBiome = mcData.biomes[startBiomeId]?.name ?? 'unknown';
   const t0 = Date.now();
+  const tStart = nowHMS();
   const goal = new GoalNearXZ(tx, tz, 16);
   bot.pathfinder.setGoal(goal, false);
 
@@ -231,13 +240,14 @@ function executeAction({ theta, distance }, cb) {
     const dt = ((Date.now() - t0) / 1000).toFixed(1);
     // Single-line, grep-able per-move trace in block coordinates.
     console.log(
-      `[move bot=${ID}] theta=${theta.toFixed(0)} d=${distance} ` +
+      `[move bot=${ID} t=${tStart} a=${actionIdx}] ` +
+      `theta=${theta.toFixed(0)} d=${distance} ` +
       `start=(${sx},${sy},${sz}) startBiome=${startBiome} ` +
       `target=(${Math.round(tx)},${Math.round(tz)}) ` +
       `end=(${obs.x},${obs.z}) endBiome=${obs.biomeName} ` +
       `moved=${moved.toFixed(1)} dt=${dt}s samples=${midSamples} ` +
       `result=${stuck ? `STUCK:${reason}` : 'OK'}`);
-    if (stuck) logStuckTerrain(theta, sx, sy, sz);
+    if (stuck) logStuckTerrain(theta, sx, sy, sz, actionIdx, tStart);
     cb(obs);
   };
   const onReach = () => finish(false, 'reached');
