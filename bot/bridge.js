@@ -52,6 +52,32 @@ const bot = mineflayer.createBot({
 bot.loadPlugin(pathfinder);
 bot.visitedBiomes = new Set();
 
+// Sanitize outbound position packets: drop any with NaN/Infinity coords.
+// Known mineflayer bug (PrismarineJS/mineflayer#1467): bot.lookAt can
+// compute NaN pitch, which pathfinder then ships via _client.write,
+// which the server's hardcoded NMS validator rejects ⇒ kick. Dropping
+// these packets prevents the kick entirely.
+bot.on('inject_allowed', () => {
+  const orig = bot._client.write.bind(bot._client);
+  let droppedCount = 0;
+  bot._client.write = (name, params) => {
+    if (name && name.indexOf('position') !== -1 && params) {
+      for (const k of ['x', 'y', 'z', 'pitch', 'yaw']) {
+        const v = params[k];
+        if (typeof v === 'number' && !Number.isFinite(v)) {
+          droppedCount++;
+          if (droppedCount <= 5 || droppedCount % 50 === 0) {
+            console.log(
+              `[bad-packet bot=${ID} t=${nowHMS()}] dropped ${name} ${k}=${v} (#${droppedCount})`);
+          }
+          return;
+        }
+      }
+    }
+    return orig(name, params);
+  };
+});
+
 bot.once('spawn', () => {
   // Expanded Movements config — see stuck-cause analysis. canDig lets
   // pathfinder break leaves/wood; canPlace + scafoldingBlocks lets it
