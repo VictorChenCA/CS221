@@ -213,6 +213,10 @@ function getObs() {
   return obs;
 }
 
+// Tried 20s — but the tighter ceiling caused pathfinder to retry more
+// aggressively, server tick rate fell behind (~83s of lag), all bots
+// disconnected mid-run. 30s gives pathfinder room without overloading
+// the server (5 bots × 3 servers = 15 concurrent pathfinders).
 const ACTION_TIMEOUT_MS = 30000;
 const BIOME_SAMPLE_MS = 1000;  // 20 ticks; biome cells are 4 blocks wide
 
@@ -298,6 +302,9 @@ function executeAction({ theta, distance }, cb) {
   const startBiome = mcData.biomes[startBiomeId]?.name ?? 'unknown';
   const t0 = Date.now();
   const tStart = nowHMS();
+  // Goal tolerance = 16 blocks. Tried widening to 32 — OK rate went up
+  // but biome discovery DROPPED because each "OK" hop now covered ~30
+  // blocks instead of ~45, so fewer biome-boundary crossings. Keep 16.
   const goal = new GoalNearXZ(tx, tz, 16);
   bot.pathfinder.setGoal(goal, false);
 
