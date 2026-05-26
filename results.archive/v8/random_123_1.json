@@ -1,0 +1,12 @@
+{
+  "policy": "random",
+  "seed": 123,
+  "episode": 1,
+  "budget_s": 600.0,
+  "unique_biomes": 4,
+  "biomes_per_action": 0.07692307692307693,
+  "position_entropy": 2.659348037832365,
+  "position_coverage": 0.014240506329113924,
+  "biome_entropy": 0.6429461045256082,
+  "n_actions": 52
+}

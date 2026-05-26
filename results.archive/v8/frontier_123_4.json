@@ -1,0 +1,12 @@
+{
+  "policy": "frontier",
+  "seed": 123,
+  "episode": 4,
+  "budget_s": 600.0,
+  "unique_biomes": 4,
+  "biomes_per_action": 0.1111111111111111,
+  "position_entropy": 2.397086297337258,
+  "position_coverage": 0.011075949367088608,
+  "biome_entropy": 1.0889979745227922,
+  "n_actions": 36
+}

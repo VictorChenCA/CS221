@@ -84,23 +84,25 @@ def write_ops_json(dst: Path, n_bots_total: int) -> None:
 def stage_server_dir(seed: int, port: int, n_bots_total: int) -> Path:
     src = ROOT / "mc-server"
     dst = ROOT / f"mc-server-test{seed}"
-    if not dst.exists():
+    fresh = not dst.exists()
+    if fresh:
         print(f"[setup] {dst.name} (seed={seed} port={port})")
         dst.mkdir()
         # Copy (not symlink — Windows requires admin or developer mode).
         shutil.copy(src / "paper.jar", dst / "paper.jar")
-        for fname in ("eula.txt", "server.properties", "bukkit.yml",
-                      "spigot.yml", "commands.yml", "help.yml",
-                      "permissions.yml"):
+        for fname in ("eula.txt", "bukkit.yml", "spigot.yml",
+                      "commands.yml", "help.yml", "permissions.yml"):
             if (src / fname).exists():
                 shutil.copy(src / fname, dst / fname)
         if (src / "config").exists():
             shutil.copytree(src / "config", dst / "config")
-        props = dst / "server.properties"
-        text = props.read_text()
-        text = re.sub(r"^level-seed=.*$", f"level-seed={seed}", text, flags=re.M)
-        text = re.sub(r"^server-port=.*$", f"server-port={port}", text, flags=re.M)
-        props.write_text(text)
+    # Always rewrite server.properties so view-distance / sim-distance
+    # tweaks in the source propagate to existing test dirs (otherwise an
+    # old high view-distance keeps causing keepalive kicks).
+    text = (src / "server.properties").read_text()
+    text = re.sub(r"^level-seed=.*$", f"level-seed={seed}", text, flags=re.M)
+    text = re.sub(r"^server-port=.*$", f"server-port={port}", text, flags=re.M)
+    (dst / "server.properties").write_text(text)
     # Always rewrite ops.json — needs all bot UUIDs so they can /tp.
     write_ops_json(dst, n_bots_total)
     return dst
