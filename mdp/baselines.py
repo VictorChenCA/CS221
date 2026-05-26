@@ -42,19 +42,41 @@ class RandomPolicy:
 
 
 class FrontierSectorVote:
-    """Original 'largest-sector' frontier — the version used before the
-    May 23 Yamauchi switch.
+    """Sector-vote frontier with optional configurability.
 
-    For each of 8 compass directions, count cells inside that wedge
-    whose biome ∉ visited. Pick the direction with the highest count.
-    Random tiebreak. Falls back to random if no novel cells visible.
+    For each of 8 compass directions, count cells inside that wedge whose
+    biome ∉ visited. Pick the direction with the highest count. Random
+    tiebreak. Falls back to random if no novel cells visible.
+
+    Parameters
+    ----------
+    max_radius : int | None
+        If set, ignore cells farther than this many *cells* from the bot.
+        Useful for testing whether a smaller effective grid (e.g. 32
+        cells = 128 blocks) outperforms the full 128-cell grid.
+    penalize_visited : bool
+        If True, subtract the count of *physically visited* cells per
+        sector from the novel-biome count. Penalizes "I already walked
+        through there" even when the biomes happen to be unvisited.
+    distance : int (class attribute)
+        Hop distance the policy "prefers" — eval.py reads this off the
+        instance and passes it to Env so different variants can use
+        25/50/75-block hops.
     """
 
-    def __init__(self, seed: int | None = None):
+    distance = None  # falls back to env's DEFAULT_DISTANCE
+
+    def __init__(self, seed: int | None = None, *,
+                 max_radius: int | None = None,
+                 penalize_visited: bool = False):
         self.rng = random.Random(seed)
+        self.max_radius = max_radius
+        self.penalize_visited = penalize_visited
+        self.visited_cells: set[tuple[int, int]] = set()
         self.stats: Counter = Counter()
 
     def reset(self) -> None:
+        self.visited_cells.clear()
         self.stats = Counter()
 
     def act(self, obs: dict) -> int:
@@ -63,28 +85,55 @@ class FrontierSectorVote:
         r = obs["gridRadius"]
         size = 2 * r + 1
         visited = set(obs["visitedBiomes"])
-        scores = [0] * NUM_ACTIONS
+        cellX = obs.get("cellX")
+        cellZ = obs.get("cellZ")
+        if cellX is not None and cellZ is not None:
+            self.visited_cells.add((cellX, cellZ))
+
+        # Effective radius — clip to whatever the policy requested.
+        eff_r = r if self.max_radius is None else min(self.max_radius, r)
+        eff_r2 = eff_r * eff_r
+
+        novel_scores = [0] * NUM_ACTIONS
+        visited_scores = [0] * NUM_ACTIONS
         n_novel = 0
 
         for row in range(size):
+            dz = row - r
+            if abs(dz) > eff_r:
+                continue
             for col in range(size):
                 dx = col - r
-                dz = row - r
-                if dx == 0 and dz == 0:
+                if abs(dx) > eff_r or (dx == 0 and dz == 0):
+                    continue
+                if dx * dx + dz * dz > eff_r2:
                     continue
                 b = grid[row * size + col]
-                if b == -1 or b in visited:
+                if b == -1:
                     continue
-                n_novel += 1
                 angle = math.atan2(dx, -dz)
                 if angle < 0:
                     angle += 2 * math.pi
                 sector = int(round(angle / (2 * math.pi / NUM_ACTIONS))) % NUM_ACTIONS
-                scores[sector] += 1
+
+                if b in visited:
+                    # Biome-familiar cell. Count toward visited-cell
+                    # penalty only if the bot has *physically* been here.
+                    if self.penalize_visited and cellX is not None:
+                        cell_xz = (cellX + dx, cellZ + dz)
+                        if cell_xz in self.visited_cells:
+                            visited_scores[sector] += 1
+                else:
+                    novel_scores[sector] += 1
+                    n_novel += 1
 
         self.stats["novel_cells_seen_sum"] += n_novel
+        if self.penalize_visited:
+            scores = [n - v for n, v in zip(novel_scores, visited_scores)]
+        else:
+            scores = novel_scores
         best = max(scores)
-        if best == 0:
+        if best <= 0:
             self.stats["random_fallback"] += 1
             return self.rng.randrange(NUM_ACTIONS)
         self.stats["directed"] += 1

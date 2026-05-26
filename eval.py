@@ -48,15 +48,27 @@ def make_policy(name: str, seed: int):
         return FrontierPolicy(seed=seed)  # = FrontierClusterCentroid (current default)
     if name == "frontier_sector":
         return FrontierSectorVote(seed=seed)
+    if name == "frontier_sector_grid32":
+        return FrontierSectorVote(seed=seed, max_radius=32)   # 128-block window
+    if name == "frontier_sector_grid64":
+        return FrontierSectorVote(seed=seed, max_radius=64)   # 256-block window
+    if name == "frontier_sector_penalty":
+        return FrontierSectorVote(seed=seed, penalize_visited=True)
+    if name == "frontier_sector_short":
+        p = FrontierSectorVote(seed=seed)
+        p.distance = 25
+        return p
+    if name == "frontier_sector_long":
+        p = FrontierSectorVote(seed=seed)
+        p.distance = 75
+        return p
     if name == "frontier_closest":
         return FrontierClosestCell(seed=seed)
     if name == "frontier_cluster":
         return FrontierClusterCentroid(seed=seed)
     if name == "frontier_cells":
         return FrontierUnvisitedCells(seed=seed)
-    raise ValueError(f"unknown policy '{name}' — choose from "
-                     "random/frontier/frontier_sector/frontier_closest/"
-                     "frontier_cluster/frontier_cells/qlearn/oracle")
+    raise ValueError(f"unknown policy '{name}'")
 
 
 def run_policy_episode(env: Env, policy, budget_s: float) -> tuple[list[dict], dict]:
@@ -175,6 +187,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--policy", required=True,
                     choices=["random", "frontier", "frontier_sector",
+                             "frontier_sector_grid32", "frontier_sector_grid64",
+                             "frontier_sector_penalty",
+                             "frontier_sector_short", "frontier_sector_long",
                              "frontier_closest", "frontier_cluster",
                              "frontier_cells", "qlearn", "oracle"])
     ap.add_argument("--seed", type=int, required=True,
@@ -193,23 +208,34 @@ def main():
     args = ap.parse_args()
 
     view = NpzWorldView(args.seed) if args.mode == "complete" else None
-    env = Env(port=9000 + args.bot_id, timeout=args.budget_s + 60,
-              world_view=view)
+    # Build the policy first so we can read off any hop-distance override
+    # before constructing Env (which uses a fixed distance per episode).
+    policy_obj = None
+    pre_policy = None
+    if args.policy not in ("oracle", "qlearn"):
+        pre_policy = make_policy(args.policy, seed=args.seed)
+    elif args.policy == "qlearn":
+        from mdp.qlearn import LinearQ
+        pre_policy = LinearQ.load(args.weights)
+        pre_policy.epsilon = 0.0
+    distance_override = getattr(pre_policy, "distance", None) if pre_policy else None
+    env_kwargs = {"port": 9000 + args.bot_id,
+                  "timeout": args.budget_s + 60,
+                  "world_view": view}
+    if distance_override is not None:
+        env_kwargs["distance"] = distance_override
+    env = Env(**env_kwargs)
     termination: dict = {"termination": "oracle", "elapsed_s": None,
                          "dead_reason": None, "dead_at_action": None}
-    policy_obj = None
     try:
         if args.policy == "oracle":
             trail = run_oracle_episode(env, args.seed, args.radius, args.budget_s)
         elif args.policy == "qlearn":
-            from mdp.qlearn import LinearQ
-            agent = LinearQ.load(args.weights)
-            agent.epsilon = 0.0  # greedy at eval
-            policy_obj = agent
-            trail, termination = run_policy_episode(env, agent, args.budget_s)
+            policy_obj = pre_policy
+            trail, termination = run_policy_episode(env, pre_policy, args.budget_s)
         else:
-            policy_obj = make_policy(args.policy, seed=args.seed)
-            trail, termination = run_policy_episode(env, policy_obj, args.budget_s)
+            policy_obj = pre_policy
+            trail, termination = run_policy_episode(env, pre_policy, args.budget_s)
     finally:
         env.close()
 
