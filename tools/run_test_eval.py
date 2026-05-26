@@ -267,6 +267,23 @@ def summarize_results() -> None:
                      f"| biome_ent={sum(ent)/len(ent):.2f} "
                      f"| cov={sum(cov)/len(cov):.4f}")
 
+    # Termination breakdown — distinguishes real full-budget episodes
+    # from ones cut short by death/laptop-closed/etc. If you see >0
+    # dead_mid_run or laptop-closed-style truncated elapsed_s, the
+    # ub_mean above is undercounting that policy's true performance.
+    lines.append("")
+    lines.append("=== termination breakdown ===")
+    for p, rs in sorted(by_policy.items()):
+        term_counts: dict[str, int] = defaultdict(int)
+        elapsed: list[float] = []
+        for r in rs:
+            term_counts[r.get("termination", "unknown")] += 1
+            if r.get("elapsed_s") is not None:
+                elapsed.append(r["elapsed_s"])
+        mean_elapsed = (sum(elapsed) / len(elapsed)) if elapsed else 0.0
+        breakdown = " ".join(f"{k}={v}" for k, v in sorted(term_counts.items()))
+        lines.append(f"  {p:<10} elapsed_mean={mean_elapsed:>6.1f}s   {breakdown}")
+
     summary = "\n".join(lines)
     print()
     print(summary)

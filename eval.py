@@ -42,26 +42,49 @@ def make_policy(name: str, seed: int):
     raise ValueError(f"unknown policy '{name}' (use random/frontier/oracle)")
 
 
-def run_policy_episode(env: Env, policy, budget_s: float) -> list[dict]:
-    """Step `policy` against `env` until budget elapses. Return obs trail.
+def run_policy_episode(env: Env, policy, budget_s: float) -> tuple[list[dict], dict]:
+    """Step `policy` against `env` until budget elapses. Return (trail, termination_info).
 
     Exits early when the bridge reports `dead: true` — the underlying MC
     bot has been kicked, so further actions only burn wall-clock waiting
-    for stale-state pathfinder timeouts."""
+    for stale-state pathfinder timeouts.
+
+    termination_info captures HOW the episode ended:
+      - termination: "budget_exhausted" | "dead_at_warmup" | "dead_mid_run"
+      - elapsed_s: wall-clock elapsed inside the loop
+      - dead_reason: bridge-reported reason if dead, else None
+      - dead_at_action: action index where bot died, else None
+    This lets us distinguish a real full-budget episode from a truncated
+    one (laptop closed, server hang, keepalive kick, NaN, etc.) when
+    aggregating across runs."""
     policy.reset()
+    t0 = time.monotonic()
     trail = [env.observe()]  # warmup: no-op observe (no pathfinder run)
     if trail[-1].get("dead"):
-        print(f"[eval] bot dead at warmup: {trail[-1].get('reason')}")
-        return trail
-    t0 = time.monotonic()
+        reason = trail[-1].get("reason")
+        elapsed = time.monotonic() - t0
+        print(f"[eval] bot dead at warmup: {reason}")
+        print(f"[eval-done] termination=dead_at_warmup elapsed={elapsed:.1f}s "
+              f"actions=0 dead_reason={reason}")
+        return trail, {"termination": "dead_at_warmup", "elapsed_s": elapsed,
+                       "dead_reason": reason, "dead_at_action": 0}
     while time.monotonic() - t0 < budget_s:
         action = policy.act(trail[-1])
         obs = env.step(action)
         trail.append(obs)
         if obs.get("dead"):
-            print(f"[eval] bot dead after action {len(trail)-1}: {obs.get('reason')}")
-            break
-    return trail
+            reason = obs.get("reason")
+            elapsed = time.monotonic() - t0
+            print(f"[eval] bot dead after action {len(trail)-1}: {reason}")
+            print(f"[eval-done] termination=dead_mid_run elapsed={elapsed:.1f}s "
+                  f"actions={len(trail)-1} dead_reason={reason}")
+            return trail, {"termination": "dead_mid_run", "elapsed_s": elapsed,
+                           "dead_reason": reason, "dead_at_action": len(trail) - 1}
+    elapsed = time.monotonic() - t0
+    print(f"[eval-done] termination=budget_exhausted elapsed={elapsed:.1f}s "
+          f"actions={len(trail)-1} dead_reason=None")
+    return trail, {"termination": "budget_exhausted", "elapsed_s": elapsed,
+                   "dead_reason": None, "dead_at_action": None}
 
 
 def run_oracle_episode(env: Env, seed: int, radius_cells: int,
@@ -153,6 +176,8 @@ def main():
     view = NpzWorldView(args.seed) if args.mode == "complete" else None
     env = Env(port=9000 + args.bot_id, timeout=args.budget_s + 60,
               world_view=view)
+    termination: dict = {"termination": "oracle", "elapsed_s": None,
+                         "dead_reason": None, "dead_at_action": None}
     try:
         if args.policy == "oracle":
             trail = run_oracle_episode(env, args.seed, args.radius, args.budget_s)
@@ -160,10 +185,10 @@ def main():
             from mdp.qlearn import LinearQ
             agent = LinearQ.load(args.weights)
             agent.epsilon = 0.0  # greedy at eval
-            trail = run_policy_episode(env, agent, args.budget_s)
+            trail, termination = run_policy_episode(env, agent, args.budget_s)
         else:
             policy = make_policy(args.policy, seed=args.seed)
-            trail = run_policy_episode(env, policy, args.budget_s)
+            trail, termination = run_policy_episode(env, policy, args.budget_s)
     finally:
         env.close()
 
@@ -178,6 +203,7 @@ def main():
         "episode": args.episode,
         "budget_s": args.budget_s,
         **metrics,
+        **termination,
     }, indent=2))
     print(json.dumps(metrics, indent=2))
 
