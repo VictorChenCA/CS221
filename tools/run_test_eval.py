@@ -34,9 +34,18 @@ BUDGET_S = 600
 # run 1 with EPISODE_OFFSET=0 writes ep ids 0..(BOTS_PER_SERVER-1),
 # run 2 with EPISODE_OFFSET=5 writes ep ids 5..(BOTS_PER_SERVER-1+5), etc.
 EPISODE_OFFSET = int(os.environ.get("EPISODE_OFFSET", "0"))
+# Number of parallel MC servers per seed. With SEED_INSTANCES=2, each
+# of the three test seeds runs on two servers (=6 servers total), giving
+# n=10 episodes per seed at BOTS_PER_SERVER=5. Spreads chunk-gen load so
+# we don't bunch 10 bots onto one server (keepalive risk).
+SEED_INSTANCES = int(os.environ.get("SEED_INSTANCES", "1"))
 BASE_MC_PORT = 25565
 SETTLE_S = 90  # cold-boot chunk gen for 5 dispersal points takes 60-90s
 SERVER_READY_TIMEOUT_S = 360
+# JVM heap: lower when we're running many servers in parallel to fit
+# in typical 32GB laptop RAM. 6 servers × 4G = 24G.
+JVM_XMX = os.environ.get("JVM_XMX", "6G")
+JVM_XMS = os.environ.get("JVM_XMS", "2G")
 
 LOGS = ROOT / "logs"
 PROCS: list[subprocess.Popen] = []
@@ -81,9 +90,12 @@ def write_ops_json(dst: Path, n_bots_total: int) -> None:
     (dst / "ops.json").write_text(json.dumps(ops, indent=2))
 
 
-def stage_server_dir(seed: int, port: int, n_bots_total: int) -> Path:
+def stage_server_dir(seed: int, instance: int, port: int, n_bots_total: int) -> Path:
     src = ROOT / "mc-server"
-    dst = ROOT / f"mc-server-test{seed}"
+    # Distinct dir per (seed, instance) so duplicate-seed servers don't
+    # share world data. instance=0 keeps the legacy dir name.
+    suffix = "" if instance == 0 else f"-i{instance}"
+    dst = ROOT / f"mc-server-test{seed}{suffix}"
     fresh = not dst.exists()
     if fresh:
         print(f"[setup] {dst.name} (seed={seed} port={port})")
@@ -148,24 +160,29 @@ def main() -> None:
         sys.exit(f"--policies includes 'qlearn' but {args.weights} doesn't exist. "
                  f"Train first with `python3 train.py`.")
 
-    n_bots_total = len(SEEDS) * BOTS_PER_SERVER
-    servers = []
-    for i, seed in enumerate(SEEDS):
-        port = BASE_MC_PORT + i
-        d = stage_server_dir(seed, port, n_bots_total)
-        servers.append((seed, port, d))
+    # Expand SEEDS into one entry per (seed, instance) — duplicates show
+    # up multiple times in this list so the loop body doesn't have to
+    # know about instances.
+    server_specs = [(s, i) for s in SEEDS for i in range(SEED_INSTANCES)]
+    n_bots_total = len(server_specs) * BOTS_PER_SERVER
+    servers = []  # list of (seed, instance, port, dir)
+    for srv_idx, (seed, inst) in enumerate(server_specs):
+        port = BASE_MC_PORT + srv_idx
+        d = stage_server_dir(seed, inst, port, n_bots_total)
+        servers.append((seed, inst, port, d))
 
-    for seed, _, d in servers:
-        log = LOGS / f"server_{seed}.log"
+    for seed, inst, _, d in servers:
+        log = LOGS / f"server_{seed}_i{inst}.log"
         print(f"[server] booting {d.name}")
-        spawn(["java", "-Xmx6G", "-Xms2G", "-jar", "paper.jar", "nogui"],
-              log, cwd=d)
-    for seed, _, _ in servers:
-        wait_for_done(LOGS / f"server_{seed}.log", f"server {seed}")
+        spawn(["java", f"-Xmx{JVM_XMX}", f"-Xms{JVM_XMS}",
+               "-jar", "paper.jar", "nogui"], log, cwd=d)
+    for seed, inst, _, _ in servers:
+        wait_for_done(LOGS / f"server_{seed}_i{inst}.log",
+                      f"server {seed}_i{inst}")
     print()
     print("=== Server endpoints (connect with vanilla Minecraft client) ===")
-    for seed, port, _ in servers:
-        print(f"  seed={seed}  ->  localhost:{port}")
+    for seed, inst, port, _ in servers:
+        print(f"  seed={seed} inst={inst}  ->  localhost:{port}")
     print()
 
     bot_procs: list[subprocess.Popen] = []
@@ -174,7 +191,7 @@ def main() -> None:
         """Spawn one bot bridge per (server, slot). Tag logs by policy so
         bots from a later policy don't clobber the prior policy's logs."""
         bot_procs.clear()
-        for s_idx, (_, port, _) in enumerate(servers):
+        for s_idx, (_, _, port, _) in enumerate(servers):
             for b in range(BOTS_PER_SERVER):
                 bot_id = s_idx * BOTS_PER_SERVER + b
                 env = os.environ.copy()
@@ -207,10 +224,14 @@ def main() -> None:
         spawn_all_bots(policy)
         print(f"[run] policy={policy} start={time.strftime('%H:%M:%S')}")
         evals: list[subprocess.Popen] = []
-        for s_idx, (seed, _, _) in enumerate(servers):
+        for s_idx, (seed, inst, _, _) in enumerate(servers):
             for b in range(BOTS_PER_SERVER):
                 bot_id = s_idx * BOTS_PER_SERVER + b
-                episode = b + EPISODE_OFFSET
+                # Episode id groups together episodes from a given seed
+                # across all its instances: inst 0 writes ep 0..4,
+                # inst 1 writes ep 5..9, etc. Shifted by EPISODE_OFFSET
+                # for stacking multiple sequential driver runs.
+                episode = inst * BOTS_PER_SERVER + b + EPISODE_OFFSET
                 log = LOGS / f"eval_{policy}_{seed}_{episode}.log"
                 cmd = [sys.executable, "eval.py", "--policy", policy,
                        "--seed", str(seed), "--bot-id", str(bot_id),
