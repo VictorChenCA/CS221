@@ -9,6 +9,7 @@ node_modules/
 
 # runs
 results/
+results.archive/
 runs/
 *.log
 *.pkl
