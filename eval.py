@@ -25,7 +25,13 @@ from collections import Counter
 from pathlib import Path
 
 from mdp.env import Env
-from mdp.baselines import RandomPolicy, FrontierPolicy
+from mdp.baselines import (
+    RandomPolicy,
+    FrontierPolicy,
+    FrontierSectorVote,
+    FrontierClosestCell,
+    FrontierClusterCentroid,
+)
 from mdp.world import NpzWorldView
 
 RESULTS_DIR = Path(__file__).parent / "results"
@@ -38,8 +44,16 @@ def make_policy(name: str, seed: int):
     if name == "random":
         return RandomPolicy(seed=seed)
     if name == "frontier":
-        return FrontierPolicy(seed=seed)
-    raise ValueError(f"unknown policy '{name}' (use random/frontier/oracle)")
+        return FrontierPolicy(seed=seed)  # = FrontierClusterCentroid (current default)
+    if name == "frontier_sector":
+        return FrontierSectorVote(seed=seed)
+    if name == "frontier_closest":
+        return FrontierClosestCell(seed=seed)
+    if name == "frontier_cluster":
+        return FrontierClusterCentroid(seed=seed)
+    raise ValueError(f"unknown policy '{name}' — choose from "
+                     "random/frontier/frontier_sector/frontier_closest/"
+                     "frontier_cluster/qlearn/oracle")
 
 
 def run_policy_episode(env: Env, policy, budget_s: float) -> tuple[list[dict], dict]:
@@ -157,7 +171,9 @@ def _entropy(counts) -> float:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--policy", required=True,
-                    choices=["random", "frontier", "qlearn", "oracle"])
+                    choices=["random", "frontier", "frontier_sector",
+                             "frontier_closest", "frontier_cluster",
+                             "qlearn", "oracle"])
     ap.add_argument("--seed", type=int, required=True,
                     help="world seed (must match the running server)")
     ap.add_argument("--episode", type=int, default=0)
