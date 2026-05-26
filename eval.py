@@ -31,6 +31,7 @@ from mdp.baselines import (
     FrontierSectorVote,
     FrontierClosestCell,
     FrontierClusterCentroid,
+    FrontierUnvisitedCells,
 )
 from mdp.world import NpzWorldView
 
@@ -51,9 +52,11 @@ def make_policy(name: str, seed: int):
         return FrontierClosestCell(seed=seed)
     if name == "frontier_cluster":
         return FrontierClusterCentroid(seed=seed)
+    if name == "frontier_cells":
+        return FrontierUnvisitedCells(seed=seed)
     raise ValueError(f"unknown policy '{name}' — choose from "
                      "random/frontier/frontier_sector/frontier_closest/"
-                     "frontier_cluster/qlearn/oracle")
+                     "frontier_cluster/frontier_cells/qlearn/oracle")
 
 
 def run_policy_episode(env: Env, policy, budget_s: float) -> tuple[list[dict], dict]:
@@ -173,7 +176,7 @@ def main():
     ap.add_argument("--policy", required=True,
                     choices=["random", "frontier", "frontier_sector",
                              "frontier_closest", "frontier_cluster",
-                             "qlearn", "oracle"])
+                             "frontier_cells", "qlearn", "oracle"])
     ap.add_argument("--seed", type=int, required=True,
                     help="world seed (must match the running server)")
     ap.add_argument("--episode", type=int, default=0)
@@ -194,6 +197,7 @@ def main():
               world_view=view)
     termination: dict = {"termination": "oracle", "elapsed_s": None,
                          "dead_reason": None, "dead_at_action": None}
+    policy_obj = None
     try:
         if args.policy == "oracle":
             trail = run_oracle_episode(env, args.seed, args.radius, args.budget_s)
@@ -201,16 +205,22 @@ def main():
             from mdp.qlearn import LinearQ
             agent = LinearQ.load(args.weights)
             agent.epsilon = 0.0  # greedy at eval
+            policy_obj = agent
             trail, termination = run_policy_episode(env, agent, args.budget_s)
         else:
-            policy = make_policy(args.policy, seed=args.seed)
-            trail, termination = run_policy_episode(env, policy, args.budget_s)
+            policy_obj = make_policy(args.policy, seed=args.seed)
+            trail, termination = run_policy_episode(env, policy_obj, args.budget_s)
     finally:
         env.close()
 
     metrics = compute_metrics(trail)
     n_stuck = sum(1 for o in trail if o.get("stuck"))
-    print(f"[eval] {n_stuck} stuck of {metrics['n_actions']} actions")
+    # Pull policy-internal diagnostics if the policy exposes a stats Counter.
+    policy_stats = {}
+    if policy_obj is not None and hasattr(policy_obj, "stats"):
+        policy_stats = dict(policy_obj.stats)
+    print(f"[eval] {n_stuck} stuck of {metrics['n_actions']} actions  "
+          f"policy_stats={policy_stats}")
     out = RESULTS_DIR / f"{args.policy}_{args.seed}_{args.episode}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps({
@@ -218,8 +228,10 @@ def main():
         "seed": args.seed,
         "episode": args.episode,
         "budget_s": args.budget_s,
+        "n_stuck": n_stuck,
         **metrics,
         **termination,
+        "policy_stats": policy_stats,
     }, indent=2))
     print(json.dumps(metrics, indent=2))
 

@@ -26,7 +26,8 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SEEDS = [123, 456, 789]
+# Test seeds: proposal defaults [123, 456, 789]; override via SEEDS=11111,22222,...
+SEEDS = [int(s) for s in os.environ.get("SEEDS", "123,456,789").split(",")]
 POLICIES = ["random", "frontier", "oracle"]
 BOTS_PER_SERVER = 5
 BUDGET_S = 600
