@@ -69,6 +69,7 @@ def plan(
     # ------------------------------------------------------------
 
     biome_cells: dict[int, list[tuple[int, int]]] = {}
+    cell_biome: dict[tuple[int, int], int] = {}
 
     for dz in range(-radius_cells, radius_cells + 1):
         for dx in range(-radius_cells, radius_cells + 1):
@@ -81,12 +82,37 @@ def plan(
                 continue
 
             biome_cells.setdefault(b, []).append((cx, cz))
+            cell_biome[(cx, cz)] = b
 
     start_biome = biome_at(sx, sz)
 
     # Remove starting biome from targets.
     if start_biome in biome_cells:
         del biome_cells[start_biome]
+
+    # ------------------------------------------------------------
+    # Filter each biome's cell list down to 'interior' cells — those
+    # surrounded by ≥ INTERIOR_RADIUS cells of the same biome on every
+    # side. GoalNearXZ tolerance is 16 blocks = 4 cells, so a target
+    # 4+ cells inside the biome lands the bot reliably *in* the biome
+    # rather than at its boundary. If a biome has no interior cells
+    # (small region), we fall back to the closest boundary cell.
+    # ------------------------------------------------------------
+
+    INTERIOR_RADIUS = 4  # cells; matches the 16-block GoalNearXZ tolerance
+
+    def is_interior(cx: int, cz: int, biome_id: int) -> bool:
+        for dz2 in range(-INTERIOR_RADIUS, INTERIOR_RADIUS + 1):
+            for dx2 in range(-INTERIOR_RADIUS, INTERIOR_RADIUS + 1):
+                if cell_biome.get((cx + dx2, cz + dz2)) != biome_id:
+                    return False
+        return True
+
+    biome_interior: dict[int, list[tuple[int, int]]] = {}
+    for bid, cells in biome_cells.items():
+        interior = [c for c in cells if is_interior(c[0], c[1], bid)]
+        if interior:
+            biome_interior[bid] = interior
 
     # ------------------------------------------------------------
     # Greedy coverage loop.
@@ -115,8 +141,12 @@ def plan(
 
         for biome_id, cells in biome_cells.items():
 
+            # Prefer an interior cell so pathfinder's 16-block tolerance
+            # still lands the bot inside the biome. Fall back to closest
+            # boundary cell for biomes that have no interior region.
+            candidates = biome_interior.get(biome_id, cells)
             nearest_cell = min(
-                cells,
+                candidates,
                 key=lambda c: _block_dist(cur, c)
             )
 
