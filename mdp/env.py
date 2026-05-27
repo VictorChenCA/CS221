@@ -15,13 +15,15 @@ bridge's grid is forwarded as-is.
 """
 
 import json
+import os
 import socket
 import time
 
 from mdp.world import NpzWorldView
 
 NUM_ACTIONS = 8
-DEFAULT_DISTANCE = 50
+# Env-configurable so we can sweep hop distances without code edits.
+DEFAULT_DISTANCE = int(os.environ.get("HOP_DISTANCE", "50"))
 DEFAULT_GRID_RADIUS = 128  # cells = 32 chunks (1 chunk = 16 blocks = 4 cells)
 # How long to keep retrying ConnectionRefused before giving up. The bridge
 # only opens its TCP listener after the bot has spawned + dispersed +
