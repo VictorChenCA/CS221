@@ -63,8 +63,14 @@ def plan(
     radius_cells: int,
     time_budget_s: float,
     biome_at: BiomeFn | None = None,
+    visited: set[int] | None = None,
 ) -> Plan:
-    """Greedy biome-coverage oracle."""
+    """Greedy biome-coverage oracle.
+
+    `visited` (optional): biome ids the bot has already physically
+    entered. Online-replanning callers pass this each step so the
+    planner skips re-targeting biomes the bot already collected.
+    """
 
     if biome_at is None:
         biome_at = NpzWorldView(seed).biome_at
@@ -96,6 +102,10 @@ def plan(
     # Remove starting biome from targets.
     if start_biome in biome_cells:
         del biome_cells[start_biome]
+    # Also remove any biomes the caller already visited (online replan).
+    if visited is not None:
+        for v in list(visited):
+            biome_cells.pop(v, None)
 
     # ------------------------------------------------------------
     # Filter each biome's cell list down to 'interior' cells — those

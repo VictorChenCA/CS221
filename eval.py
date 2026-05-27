@@ -129,26 +129,60 @@ def run_policy_episode(env: Env, policy, budget_s: float) -> tuple[list[dict], d
 
 def run_oracle_episode(env: Env, seed: int, radius_cells: int,
                        budget_s: float) -> tuple[list[dict], int]:
-    """Plan offline from start_cell, replay hops through the bridge.
+    """Online-replanning oracle. After each hop, re-plan from the bot's
+    *actual* landed position (which may differ from the planned target
+    when pathfinder fails). The planner skips biomes already physically
+    entered, so failures don't cascade — the next hop targets whatever
+    is closest *now*.
 
-    Returns (trail, theoretical_ub):
+    Returns (trail, planned_ub_initial):
       - trail: actual obs sequence (subject to pathfinder failures)
-      - theoretical_ub: len(plan.expected_biomes), the upper bound the
-        plan would achieve under perfect execution within budget_s.
+      - planned_ub_initial: the offline plan's expected biome count
+        from the START position (the theoretical UB at episode start).
     """
     from mdp import oracle  # local: keep numpy out of the policy path
-    warmup = env.observe()
-    start_cell = (warmup["cellX"], warmup["cellZ"])
-    plan = oracle.plan(seed=seed, start_cell=start_cell,
-                       radius_cells=radius_cells, time_budget_s=budget_s)
-    trail = [warmup]
-    for hop in plan.hops:
-        if warmup.get("dead"):
+    obs = env.observe()
+    trail = [obs]
+    if obs.get("dead"):
+        return trail, 0
+
+    visited: set[int] = set()
+    start_b = obs.get("biomeId", -1)
+    if start_b is not None and start_b >= 0:
+        visited.add(start_b)
+
+    # Build the INITIAL plan from start position for reporting the
+    # theoretical UB (what the offline planner thinks is achievable).
+    start_cell = (obs["cellX"], obs["cellZ"])
+    initial_plan = oracle.plan(seed=seed, start_cell=start_cell,
+                               radius_cells=radius_cells,
+                               time_budget_s=budget_s)
+    planned_ub_initial = len(initial_plan.expected_biomes)
+
+    t0 = time.monotonic()
+    # Online replan loop — re-plan after every step from the current
+    # cell, skipping already-visited biomes. Execute only the FIRST hop
+    # of each fresh plan.
+    while time.monotonic() - t0 < budget_s:
+        cur_cell = (obs.get("cellX"), obs.get("cellZ"))
+        if cur_cell[0] is None or cur_cell[1] is None:
             break
-        trail.append(env.step_raw(hop.theta_deg, hop.distance_blocks))
-        if trail[-1].get("dead"):
+        remaining_budget = budget_s - (time.monotonic() - t0)
+        new_plan = oracle.plan(seed=seed, start_cell=cur_cell,
+                               radius_cells=radius_cells,
+                               time_budget_s=remaining_budget,
+                               visited=visited)
+        if not new_plan.hops:
+            break  # no more reachable biomes within budget
+        hop = new_plan.hops[0]
+        obs = env.step_raw(hop.theta_deg, hop.distance_blocks)
+        trail.append(obs)
+        b = obs.get("biomeId", -1)
+        if b is not None and b >= 0:
+            visited.add(b)
+        if obs.get("dead"):
             break
-    return trail, len(plan.expected_biomes)
+    return trail, planned_ub_initial
 
 
 def compute_metrics(trail: list[dict]) -> dict:
