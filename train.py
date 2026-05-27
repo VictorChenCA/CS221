@@ -197,12 +197,16 @@ def run_episode_thread(env: Env, agent: LinearQ, budget_s: float,
     TD-update shared `agent.W` after every step (W_LOCK-guarded)."""
     try:
         prev = env.observe()
+        prev["was_stuck"] = False
         t0 = time.monotonic()
         n_steps = 0; n_stuck = 0; total_r = 0.0
         biomes_at_start = int(prev.get("numVisited", 0))
+        last_stuck = False
         while time.monotonic() - t0 < budget_s:
             a = agent.act(prev)
             obs = env.step(a)
+            # Tag obs with was_stuck for the NEXT decision's featurizer
+            obs["was_stuck"] = bool(obs.get("stuck"))
             r = compute_reward(prev, obs)
             locked_update(agent, prev, a, r, obs)
             total_r += r

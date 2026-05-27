@@ -78,15 +78,26 @@ class LinearQ:
 
 
 def compute_reward(prev_obs: dict, obs: dict) -> float:
-    """Reward: +1 per new biome, -0.03 stuck, -0.005 step.
+    """Reward shaping with stuck/unstuck bonuses (iter 13).
 
-    Penalties were originally -0.1 stuck / -0.01 step, but training showed
-    the agent over-optimized for avoidance: stuck rate dropped 2× but biome
-    discovery did not improve. Lowering penalty magnitudes lets the +1
-    discovery signal dominate the gradient again."""
+      +1.0  per new biome discovered (primary)
+      +0.20 got-unstuck bonus: previous was stuck, current is not
+      -0.03 per stuck step (existing)
+      -0.005 per step (existing tiny time penalty)
+
+    The got-unstuck bonus rewards transitioning from a stuck state to a
+    moving state. With the was_stuck feature in φ(s), Q-learning can
+    now learn 'pick a direction that gets me unstuck' rather than
+    relying on the hardcoded eval-side stuck-escape. Penalties for
+    each stuck step still apply (so loops are bad), but the +0.20
+    bonus makes "trying a different direction" actively rewarding.
+    """
     delta = int(obs.get("numVisited", 0)) - int(prev_obs.get("numVisited", 0))
     r = float(delta)
     if obs.get("stuck"):
         r -= 0.03
+    elif prev_obs.get("stuck"):
+        # was stuck, now isn't — reward for escaping
+        r += 0.20
     r -= 0.005
     return r

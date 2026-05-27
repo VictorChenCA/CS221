@@ -20,6 +20,7 @@ Usage:
 import argparse
 import json
 import math
+import os
 import time
 from collections import Counter
 from pathlib import Path
@@ -93,11 +94,16 @@ def run_policy_episode(env: Env, policy, budget_s: float) -> tuple[list[dict], d
         return trail, {"termination": "dead_at_warmup", "elapsed_s": elapsed,
                        "dead_reason": reason, "dead_at_action": 0}
 
-    STUCK_ESCAPE_STREAK = 1  # number of consecutive stucks before forcing random
+    STUCK_ESCAPE_STREAK = int(os.environ.get("STUCK_ESCAPE_STREAK", "1"))
+    # STUCK_ESCAPE_STREAK = 999 effectively disables hardcoded escape — use
+    # this to evaluate whether qlearn has *learned* to escape on its own.
     escape_rng = _random.Random()
     stuck_streak = 0
     n_escapes = 0
     while time.monotonic() - t0 < budget_s:
+        # Annotate the obs the policy will see with was_stuck so qlearn's
+        # featurizer can react to the stuck signal.
+        trail[-1]["was_stuck"] = bool(stuck_streak > 0)
         if stuck_streak >= STUCK_ESCAPE_STREAK:
             action = escape_rng.randrange(8)
             n_escapes += 1
