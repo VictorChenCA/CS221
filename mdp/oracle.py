@@ -17,11 +17,18 @@ Algorithm (greedy orienteering / set-cover):
 """
 
 import math
+import os
 from dataclasses import dataclass
 from typing import Callable
 
 from mdp.env import NUM_ACTIONS
 from mdp.world import CELL_BLOCKS, NpzWorldView
+
+# How deep inside a biome region to pick the target cell, in cells.
+# Should match the bridge's GoalNearXZ tolerance / CELL_BLOCKS so the
+# tolerance circle stays inside the biome. e.g. GOAL_TOLERANCE=8 (blocks)
+# → ORACLE_INTERIOR=2 (cells).
+DEFAULT_INTERIOR_RADIUS = int(os.environ.get("ORACLE_INTERIOR", "4"))
 
 # Conservative real-world movement estimate for Mineflayer movement.
 WALK_SPEED_BPS = 4.3
@@ -99,7 +106,7 @@ def plan(
     # (small region), we fall back to the closest boundary cell.
     # ------------------------------------------------------------
 
-    INTERIOR_RADIUS = 4  # cells; matches the 16-block GoalNearXZ tolerance
+    INTERIOR_RADIUS = DEFAULT_INTERIOR_RADIUS  # cells; matches GoalNearXZ tolerance/CELL_BLOCKS
 
     def is_interior(cx: int, cz: int, biome_id: int) -> bool:
         for dz2 in range(-INTERIOR_RADIUS, INTERIOR_RADIUS + 1):

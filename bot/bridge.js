@@ -31,6 +31,10 @@ const SPAWN_CHUNK_WAIT_MS = 2000;  // let initial chunk stream settle before ser
 // from spawn, so chunks at the tp destination are already loaded.
 const DISPERSE_R = parseInt(process.env.DISPERSE_R || '250', 10);
 const DISPERSE_N = parseInt(process.env.DISPERSE_N || '5', 10);
+// Pathfinder GoalNearXZ tolerance in blocks. Smaller = more precise
+// landing on the target (better for oracle's specific-cell targets)
+// but more pathfinder failures on hard terrain.
+const GOAL_TOLERANCE = parseInt(process.env.GOAL_TOLERANCE || '16', 10);
 const LAND_TIMEOUT_MS = 20000;  // give the bot at most this long to land after /tp
 // 'complete' = Python overlays the grid from a pre-extracted seed dump,
 // so we skip live sampling here. 'los' = bridge ships its loaded-chunk
@@ -324,10 +328,11 @@ function executeAction({ theta, distance }, cb) {
   const startBiome = mcData.biomes[startBiomeId]?.name ?? 'unknown';
   const t0 = Date.now();
   const tStart = nowHMS();
-  // Goal tolerance = 16 blocks. Tried widening to 32 — OK rate went up
-  // but biome discovery DROPPED because each "OK" hop now covered ~30
-  // blocks instead of ~45, so fewer biome-boundary crossings. Keep 16.
-  const goal = new GoalNearXZ(tx, tz, 16);
+  // Goal tolerance configurable via GOAL_TOLERANCE env var. 16 = default
+  // (1 cell wider than oracle's INTERIOR_RADIUS). Smaller (4 or 8) needs
+  // the agent's place/dig moves to be enabled (they are — Movements above)
+  // so it doesn't get stuck trying to climb terrain to the exact target.
+  const goal = new GoalNearXZ(tx, tz, GOAL_TOLERANCE);
   bot.pathfinder.setGoal(goal, false);
 
   // Sample biome every ~1s during the hop so we catch mid-traversal
