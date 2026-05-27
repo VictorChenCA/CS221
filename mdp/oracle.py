@@ -26,8 +26,11 @@ from mdp.world import CELL_BLOCKS, NpzWorldView
 # Conservative real-world movement estimate for Mineflayer movement.
 WALK_SPEED_BPS = 4.3
 
-# Match the actual macro-action scale used by the project.
-MAX_HOP_BLOCKS = 50
+# Removed in v20: oracle no longer chunks paths into 50-block hops.
+# Each biome target is now reached via a single pathfinder hop of the
+# full distance. Pathfinder has 30s to compute and execute the path;
+# may fail on long routes through water/mountains, but avoids the
+# compounding failure rate of 4-5 sequential 50-block chunks.
 
 # Pathfinding is never perfectly straight in Minecraft.
 PATH_EFFICIENCY_PENALTY = 1.5
@@ -141,31 +144,18 @@ def plan(
             break
 
         # --------------------------------------------------------
-        # Convert target vector into multiple smaller hops.
+        # Single direct hop to the target biome cell — no 50-block
+        # chunking. Each chunked hop was a separate pathfinder call
+        # that could fail; with 20-30 chunked hops per plan, failure
+        # rate compounded and only ~35% of planned biomes were hit.
+        # Going direct: pathfinder gets one shot at the full route.
         # --------------------------------------------------------
 
         dx_total = (best_cell[0] - cur[0]) * CELL_BLOCKS
         dz_total = (best_cell[1] - cur[1]) * CELL_BLOCKS
 
-        remaining = math.hypot(dx_total, dz_total)
-
-        while remaining > 1:
-
-            step_dist = min(MAX_HOP_BLOCKS, remaining)
-
-            scale = step_dist / remaining
-
-            step_dx = dx_total * scale
-            step_dz = dz_total * scale
-
-            hops.append(
-                _snap_to_compass(step_dx, step_dz)
-            )
-
-            dx_total -= step_dx
-            dz_total -= step_dz
-
-            remaining = math.hypot(dx_total, dz_total)
+        if math.hypot(dx_total, dz_total) > 1:
+            hops.append(_snap_to_compass(dx_total, dz_total))
 
         visited_biomes.append(best_biome)
 
