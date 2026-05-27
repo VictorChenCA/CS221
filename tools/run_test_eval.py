@@ -41,8 +41,12 @@ EPISODE_OFFSET = int(os.environ.get("EPISODE_OFFSET", "0"))
 # we don't bunch 10 bots onto one server (keepalive risk).
 SEED_INSTANCES = int(os.environ.get("SEED_INSTANCES", "1"))
 BASE_MC_PORT = 25565
-SETTLE_S = 90  # cold-boot chunk gen for 5 dispersal points takes 60-90s
+SETTLE_S = int(os.environ.get("SETTLE_S", "90"))
 SERVER_READY_TIMEOUT_S = 360
+# Restart MC servers between policies. Default off. Set RESTART_SERVERS=1
+# to enable — fixes the 'random's accumulated chunk-gen GC pressure
+# kills the next policy's bots at settle time' cascade we saw in v17/v18.
+RESTART_SERVERS = os.environ.get("RESTART_SERVERS", "0") == "1"
 # JVM heap: lower when we're running many servers in parallel to fit
 # in typical 32GB laptop RAM. 6 servers × 4G = 24G.
 JVM_XMX = os.environ.get("JVM_XMX", "6G")
@@ -172,14 +176,36 @@ def main() -> None:
         d = stage_server_dir(seed, inst, port, n_bots_total)
         servers.append((seed, inst, port, d))
 
-    for seed, inst, _, d in servers:
-        log = LOGS / f"server_{seed}_i{inst}.log"
-        print(f"[server] booting {d.name}")
-        spawn(["java", f"-Xmx{JVM_XMX}", f"-Xms{JVM_XMS}",
-               "-jar", "paper.jar", "nogui"], log, cwd=d)
-    for seed, inst, _, _ in servers:
-        wait_for_done(LOGS / f"server_{seed}_i{inst}.log",
-                      f"server {seed}_i{inst}")
+    server_procs: list[subprocess.Popen] = []
+
+    def boot_servers(policy_tag: str = "") -> None:
+        """Boot fresh MC servers (or initial boot). Wait for all 'Done'."""
+        server_procs.clear()
+        suffix = f"_{policy_tag}" if policy_tag else ""
+        for seed, inst, _, d in servers:
+            log = LOGS / f"server_{seed}_i{inst}{suffix}.log"
+            print(f"[server] booting {d.name}")
+            p = spawn(["java", f"-Xmx{JVM_XMX}", f"-Xms{JVM_XMS}",
+                      "-jar", "paper.jar", "nogui"], log, cwd=d)
+            server_procs.append(p)
+        for seed, inst, _, _ in servers:
+            wait_for_done(LOGS / f"server_{seed}_i{inst}{suffix}.log",
+                          f"server {seed}_i{inst}")
+
+    def kill_all_servers() -> None:
+        """Stop all MC servers — clears JVM heap, frees chunk-gen state.
+        Used between policies to prevent GC-pause keepalive cascades."""
+        for p in server_procs:
+            if p.poll() is None:
+                p.terminate()
+        for p in server_procs:
+            try:
+                p.wait(timeout=30)  # Paper takes a few seconds to save chunks
+            except subprocess.TimeoutExpired:
+                p.kill()
+        time.sleep(5)
+
+    boot_servers()
     print()
     print("=== Server endpoints (connect with vanilla Minecraft client) ===")
     for seed, inst, port, _ in servers:
@@ -222,6 +248,10 @@ def main() -> None:
         time.sleep(3)
 
     for policy_idx, policy in enumerate(policies):
+        if RESTART_SERVERS and policy_idx > 0:
+            print(f"[restart] killing MC servers for clean state before {policy}")
+            kill_all_servers()
+            boot_servers(policy)
         spawn_all_bots(policy)
         print(f"[run] policy={policy} start={time.strftime('%H:%M:%S')}")
         evals: list[subprocess.Popen] = []
