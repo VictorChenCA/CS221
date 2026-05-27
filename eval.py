@@ -74,18 +74,13 @@ def make_policy(name: str, seed: int):
 def run_policy_episode(env: Env, policy, budget_s: float) -> tuple[list[dict], dict]:
     """Step `policy` against `env` until budget elapses. Return (trail, termination_info).
 
-    Exits early when the bridge reports `dead: true` — the underlying MC
-    bot has been kicked, so further actions only burn wall-clock waiting
-    for stale-state pathfinder timeouts.
-
-    termination_info captures HOW the episode ended:
-      - termination: "budget_exhausted" | "dead_at_warmup" | "dead_mid_run"
-      - elapsed_s: wall-clock elapsed inside the loop
-      - dead_reason: bridge-reported reason if dead, else None
-      - dead_at_action: action index where bot died, else None
-    This lets us distinguish a real full-budget episode from a truncated
-    one (laptop closed, server hang, keepalive kick, NaN, etc.) when
-    aggregating across runs."""
+    Stuck-escape: deterministic policies (qlearn, frontier_sector_penalty)
+    enter same-state-same-action loops when stuck (94-99% of qlearn's actions
+    in v25 picked the same theta as the previous, with 78% stuck rate). After
+    any STUCK_ESCAPE_STREAK consecutive stuck actions, force a random
+    compass action for one step to break the loop. Random/oracle ignore this
+    (random never gets stuck-looped; oracle has its own plan)."""
+    import random as _random
     policy.reset()
     t0 = time.monotonic()
     trail = [env.observe()]  # warmup: no-op observe (no pathfinder run)
@@ -97,23 +92,39 @@ def run_policy_episode(env: Env, policy, budget_s: float) -> tuple[list[dict], d
               f"actions=0 dead_reason={reason}")
         return trail, {"termination": "dead_at_warmup", "elapsed_s": elapsed,
                        "dead_reason": reason, "dead_at_action": 0}
+
+    STUCK_ESCAPE_STREAK = 1  # number of consecutive stucks before forcing random
+    escape_rng = _random.Random()
+    stuck_streak = 0
+    n_escapes = 0
     while time.monotonic() - t0 < budget_s:
-        action = policy.act(trail[-1])
+        if stuck_streak >= STUCK_ESCAPE_STREAK:
+            action = escape_rng.randrange(8)
+            n_escapes += 1
+            stuck_streak = 0
+        else:
+            action = policy.act(trail[-1])
         obs = env.step(action)
         trail.append(obs)
+        if obs.get("stuck"):
+            stuck_streak += 1
+        else:
+            stuck_streak = 0
         if obs.get("dead"):
             reason = obs.get("reason")
             elapsed = time.monotonic() - t0
             print(f"[eval] bot dead after action {len(trail)-1}: {reason}")
             print(f"[eval-done] termination=dead_mid_run elapsed={elapsed:.1f}s "
-                  f"actions={len(trail)-1} dead_reason={reason}")
+                  f"actions={len(trail)-1} dead_reason={reason}  n_escapes={n_escapes}")
             return trail, {"termination": "dead_mid_run", "elapsed_s": elapsed,
-                           "dead_reason": reason, "dead_at_action": len(trail) - 1}
+                           "dead_reason": reason, "dead_at_action": len(trail) - 1,
+                           "n_escapes": n_escapes}
     elapsed = time.monotonic() - t0
     print(f"[eval-done] termination=budget_exhausted elapsed={elapsed:.1f}s "
-          f"actions={len(trail)-1} dead_reason=None")
+          f"actions={len(trail)-1} dead_reason=None  n_escapes={n_escapes}")
     return trail, {"termination": "budget_exhausted", "elapsed_s": elapsed,
-                   "dead_reason": None, "dead_at_action": None}
+                   "dead_reason": None, "dead_at_action": None,
+                   "n_escapes": n_escapes}
 
 
 def run_oracle_episode(env: Env, seed: int, radius_cells: int,
