@@ -117,8 +117,14 @@ def run_policy_episode(env: Env, policy, budget_s: float) -> tuple[list[dict], d
 
 
 def run_oracle_episode(env: Env, seed: int, radius_cells: int,
-                       budget_s: float) -> list[dict]:
-    """Plan offline from start_cell, replay hops through the bridge."""
+                       budget_s: float) -> tuple[list[dict], int]:
+    """Plan offline from start_cell, replay hops through the bridge.
+
+    Returns (trail, theoretical_ub):
+      - trail: actual obs sequence (subject to pathfinder failures)
+      - theoretical_ub: len(plan.expected_biomes), the upper bound the
+        plan would achieve under perfect execution within budget_s.
+    """
     from mdp import oracle  # local: keep numpy out of the policy path
     warmup = env.observe()
     start_cell = (warmup["cellX"], warmup["cellZ"])
@@ -126,8 +132,12 @@ def run_oracle_episode(env: Env, seed: int, radius_cells: int,
                        radius_cells=radius_cells, time_budget_s=budget_s)
     trail = [warmup]
     for hop in plan.hops:
+        if warmup.get("dead"):
+            break
         trail.append(env.step_raw(hop.theta_deg, hop.distance_blocks))
-    return trail
+        if trail[-1].get("dead"):
+            break
+    return trail, len(plan.expected_biomes)
 
 
 def compute_metrics(trail: list[dict]) -> dict:
@@ -227,9 +237,11 @@ def main():
     env = Env(**env_kwargs)
     termination: dict = {"termination": "oracle", "elapsed_s": None,
                          "dead_reason": None, "dead_at_action": None}
+    oracle_expected_biomes = None
     try:
         if args.policy == "oracle":
-            trail = run_oracle_episode(env, args.seed, args.radius, args.budget_s)
+            trail, oracle_expected_biomes = run_oracle_episode(
+                env, args.seed, args.radius, args.budget_s)
         elif args.policy == "qlearn":
             policy_obj = pre_policy
             trail, termination = run_policy_episode(env, pre_policy, args.budget_s)
@@ -240,6 +252,12 @@ def main():
         env.close()
 
     metrics = compute_metrics(trail)
+    # Oracle reports the THEORETICAL upper bound from the plan, not the
+    # pathfinder-degraded execution. Keep the executed-trail metrics in
+    # 'actual_unique_biomes' for diagnostic comparison.
+    if oracle_expected_biomes is not None:
+        metrics["actual_unique_biomes"] = metrics["unique_biomes"]
+        metrics["unique_biomes"] = oracle_expected_biomes
     n_stuck = sum(1 for o in trail if o.get("stuck"))
     # Pull policy-internal diagnostics if the policy exposes a stats Counter.
     policy_stats = {}
