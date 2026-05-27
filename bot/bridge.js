@@ -231,11 +231,15 @@ function getObs() {
   return obs;
 }
 
-// Tried 20s — but the tighter ceiling caused pathfinder to retry more
-// aggressively, server tick rate fell behind (~83s of lag), all bots
-// disconnected mid-run. 30s gives pathfinder room without overloading
-// the server (5 bots × 3 servers = 15 concurrent pathfinders).
-const ACTION_TIMEOUT_MS = 30000;
+// Action timeout scales with hop distance. Mineflayer walks at ~4.3 b/s
+// straight-line; with pathfinder overhead and zig-zag through terrain
+// we budget 2× the straight-line walk time plus a 10s compute buffer.
+// 50-block hop → 33s, 100 → 56, 200 → 103, 500 → 243.
+const ACTION_TIMEOUT_BASE_MS = 10000;
+const ACTION_TIMEOUT_PER_BLOCK_MS = 470;  // ≈ 1 / (4.3 b/s) × 2× margin
+function actionTimeoutMs(distance) {
+  return ACTION_TIMEOUT_BASE_MS + Math.ceil(Math.max(0, distance) * ACTION_TIMEOUT_PER_BLOCK_MS);
+}
 const BIOME_SAMPLE_MS = 1000;  // 20 ticks; biome cells are 4 blocks wide
 
 // When an action returns STUCK, dump the immediate terrain around the
@@ -367,7 +371,7 @@ function executeAction({ theta, distance }, cb) {
   const onStuck = (r) => {
     if (r.status === 'noPath' || r.status === 'timeout') finish(true, r.status);
   };
-  const timer = setTimeout(() => finish(true, 'action-timeout'), ACTION_TIMEOUT_MS);
+  const timer = setTimeout(() => finish(true, 'action-timeout'), actionTimeoutMs(distance));
   bot.once('goal_reached', onReach);
   bot.on('path_update', onStuck);
 }
