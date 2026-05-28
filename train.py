@@ -201,17 +201,32 @@ def run_episode_thread(env: Env, agent: LinearQ, budget_s: float,
         t0 = time.monotonic()
         n_steps = 0; n_stuck = 0; total_r = 0.0
         biomes_at_start = int(prev.get("numVisited", 0))
-        last_stuck = False
+        # Stuck-streak escape during training too (mirrors eval). Prevents
+        # the 5000-step stuck-spam disasters we saw in v31/v33/v37 where
+        # a single bot wedged against a wall fired ~6000 stuck actions in
+        # 300s, generating thousands of bad gradient samples that
+        # dominated the round.
+        import random as _random
+        escape_rng = _random.Random(seed)
+        stuck_streak = 0
         while time.monotonic() - t0 < budget_s:
-            a = agent.act(prev)
+            prev["was_stuck"] = bool(stuck_streak > 0)
+            if stuck_streak >= 1:
+                a = escape_rng.randrange(8)
+                stuck_streak = 0
+            else:
+                a = agent.act(prev)
             obs = env.step(a)
-            # Tag obs with was_stuck for the NEXT decision's featurizer
             obs["was_stuck"] = bool(obs.get("stuck"))
             r = compute_reward(prev, obs)
             locked_update(agent, prev, a, r, obs)
             total_r += r
             n_steps += 1
-            if obs.get("stuck"): n_stuck += 1
+            if obs.get("stuck"):
+                n_stuck += 1
+                stuck_streak += 1
+            else:
+                stuck_streak = 0
             prev = obs
         results[seed] = {
             "ok": True, "reward": total_r, "steps": n_steps,
