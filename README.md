@@ -12,10 +12,13 @@ Two cells are "the same biome" iff their biome ids match, so visit
 counting and frontier reasoning happen at this resolution.
 
 Actions are **8 compass directions × a fixed hop distance** (default
-100 blocks). Block-level locomotion (jumping, swimming, climbing) is
-delegated to `mineflayer-pathfinder`; the agent never reasons below the
-4×4 cell level. Arrival is `GoalNearXZ(range=3)` and `stuck=true`
-only when pathfinding actually fails or times out.
+50 blocks for closed-loop policies; variable for the oracle). Block-level
+locomotion (jumping, swimming, climbing, block-placing, block-digging)
+is delegated to `mineflayer-pathfinder`; the agent never reasons below
+the 4×4 cell level. Arrival is `GoalNearXZ(range=8)` by default
+(tunable via `GOAL_TOLERANCE`) and `stuck=true` only when pathfinding
+actually fails or times out (timeout scales with distance: `10s + 0.47s
+× hop_distance`).
 
 Two world settings, per proposal §2:
 
@@ -171,23 +174,52 @@ seeds.txt              Train (10) / test (3) seed split
 - `25565` — Minecraft server
 - `9000`–`9009` — one per bot bridge (up to 10 bots)
 
-## Results so far
+## Results
 
-Test seeds `{123, 456, 789}`, 3 episodes per (policy, seed), 5-min budget,
-3 bots × 3 servers in parallel via `tools/run_test_eval.py`. Primary
-metric is mean unique biomes discovered per episode (proposal §3).
+**Final hierarchy** (v42, n=25 per policy, 5 test seeds `{11111, 22222, 33333, 44444, 55555}`, 600s budget, `tol=8`, `hop=50`, stuck-escape both train+eval, online-replanning oracle):
 
-| Policy                              | n | ub mean | ub sd | ub max |
-|-------------------------------------|---|---------|-------|--------|
-| Random walk                         | 9 | 3.33    | 1.41  | 5      |
-| Frontier — largest sector (initial) | 9 | 3.00    | 1.66  | 6      |
-| Frontier — closest cell             | 9 | 2.44    | 1.42  | 5      |
-| **Frontier — cluster + centroid (Yamauchi-faithful)** | **9** | **3.44** | **1.01** | **5** |
+| Method                       | ub mean | sd   | max | Hyperparameters / Notes                                                                                            |
+|------------------------------|---------|------|-----|--------------------------------------------------------------------------------------------------------------------|
+| oracle (planned)             | 8.44    | 2.47 | 14  | offline plan upper bound (no execution); `ORACLE_RADIUS=64` cells, `ORACLE_INTERIOR=2`                             |
+| oracle (executed)            | **5.44**| —    | —   | hop=variable (4–500+), tol=8, `ORACLE_INTERIOR=2`, online replanning, no stuck-escape (replan handles it)          |
+| qlearn (PHI=19, 22 rounds)   | 4.44    | 2.04 | 10  | α=0.05, γ=0.95, ε=0.05, hop=50, tol=8; φ ∈ ℝ¹⁹ (closeness ×8, count ×8, visited_progress, was_stuck, bias)         |
+| frontier_sector_penalty      | 3.64    | 1.41 | 6   | 8-sector vote (novel cells − visited-cells per wedge), random tie-break, hop=50, tol=8, eval-time stuck-escape     |
+| random                       | 3.44    | 1.19 | 5   | uniform `random{0..7}`, hop=50, tol=8, eval-time stuck-escape (no-op, already random)                              |
 
-The cluster-centroid variant matches Yamauchi (1997) most closely: novel
-cells are 4-connected flood-filled into clusters, clusters smaller than
-3 cells are dropped (noise filter), and the bot moves toward the cluster
-with the centroid closest to it. Beats random on 2 of 3 seeds and has
-the lowest variance of any baseline.
+**Statistical significance** (vs random, two-sample z, n=25 each):
 
-Q-learning, oracle, and line-of-sight settings still pending.
+- qlearn: Δ=+1.00, SE=0.47, z=2.13, one-sided p≈0.017
+- oracle (executed): Δ=+2.00, SE=0.50, z=4.0, p<0.001
+- frontier: Δ=+0.20, SE=0.36, z=0.55, p≈0.29 (not significant)
+
+**See [`RESULTS.md`](RESULTS.md)** for the 19-iteration journey, what each change moved by how much, and open headroom.
+
+### Reproduce
+
+```bash
+# Test eval (4 policies, ~70 min on a 64GB Mac)
+RESTART_SERVERS=1 GOAL_TOLERANCE=8 ORACLE_INTERIOR=2 \
+SEEDS=11111,22222,33333,44444,55555 SEED_INSTANCES=1 \
+  python3 tools/run_test_eval.py \
+  --policies random,frontier_sector_penalty,qlearn,oracle \
+  --budget-s 600
+
+# Train qlearn from scratch (5 seeds × 24 rounds, ~2 hours)
+GOAL_TOLERANCE=8 HOP_DISTANCE=50 \
+  python3 train.py --seeds 1111,2222,3333,4444,5555 \
+    --episodes-per-seed 24 --budget-s 300 --fresh
+```
+
+### Configurable env vars
+
+| Var                     | Default | What it does                                              |
+|-------------------------|---------|-----------------------------------------------------------|
+| `GOAL_TOLERANCE`        | 16      | Pathfinder `GoalNearXZ` arrival radius (blocks)           |
+| `ORACLE_INTERIOR`       | 4       | Oracle target cell depth inside biome region (cells)      |
+| `HOP_DISTANCE`          | 50      | Hop distance for in-game policies (blocks)                |
+| `SETTLE_S`              | 90      | Bot dispersal settle time before eval starts (seconds)    |
+| `RESTART_SERVERS`       | 0       | Restart MC servers between policies (fresh JVM heap)      |
+| `JVM_XMX` / `JVM_XMS`   | 6G / 2G | MC server JVM heap                                        |
+| `STUCK_ESCAPE_STREAK`   | 1       | Stuck count before forcing random action (999 = disabled) |
+| `SEED_INSTANCES`        | 1       | Number of duplicate-seed servers per seed                 |
+| `SEEDS`                 | 123,456,789 | Comma-separated test seeds for the driver             |
