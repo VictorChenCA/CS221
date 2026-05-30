@@ -35,6 +35,8 @@ from mdp.baselines import (
     FrontierUnvisitedCells,
 )
 from mdp.world import NpzWorldView
+import mdp.oracle_cluster as oracle_cluster_mod
+import mdp.oracle_lookahead as oracle_lookahead_mod
 
 RESULTS_DIR = Path(__file__).parent / "results"
 DEFAULT_BUDGET_S = 600.0     # 10 minutes, proposal §2
@@ -134,7 +136,7 @@ def run_policy_episode(env: Env, policy, budget_s: float) -> tuple[list[dict], d
 
 
 def run_oracle_episode(env: Env, seed: int, radius_cells: int,
-                       budget_s: float) -> tuple[list[dict], int]:
+                       budget_s: float, plan_fn=None) -> tuple[list[dict], int]:
     """Online-replanning oracle. After each hop, re-plan from the bot's
     *actual* landed position (which may differ from the planned target
     when pathfinder fails). The planner skips biomes already physically
@@ -147,6 +149,9 @@ def run_oracle_episode(env: Env, seed: int, radius_cells: int,
         from the START position (the theoretical UB at episode start).
     """
     from mdp import oracle  # local: keep numpy out of the policy path
+    if plan_fn is None:
+        plan_fn = oracle.plan
+
     obs = env.observe()
     trail = [obs]
     if obs.get("dead"):
@@ -160,9 +165,9 @@ def run_oracle_episode(env: Env, seed: int, radius_cells: int,
     # Build the INITIAL plan from start position for reporting the
     # theoretical UB (what the offline planner thinks is achievable).
     start_cell = (obs["cellX"], obs["cellZ"])
-    initial_plan = oracle.plan(seed=seed, start_cell=start_cell,
-                               radius_cells=radius_cells,
-                               time_budget_s=budget_s)
+    initial_plan = plan_fn(seed=seed, start_cell=start_cell,
+                           radius_cells=radius_cells,
+                           time_budget_s=budget_s)
     planned_ub_initial = len(initial_plan.expected_biomes)
 
     t0 = time.monotonic()
@@ -174,10 +179,10 @@ def run_oracle_episode(env: Env, seed: int, radius_cells: int,
         if cur_cell[0] is None or cur_cell[1] is None:
             break
         remaining_budget = budget_s - (time.monotonic() - t0)
-        new_plan = oracle.plan(seed=seed, start_cell=cur_cell,
-                               radius_cells=radius_cells,
-                               time_budget_s=remaining_budget,
-                               visited=visited)
+        new_plan = plan_fn(seed=seed, start_cell=cur_cell,
+                           radius_cells=radius_cells,
+                           time_budget_s=remaining_budget,
+                           visited=visited)
         if not new_plan.hops:
             break  # no more reachable biomes within budget
         hop = new_plan.hops[0]
@@ -252,7 +257,8 @@ def main():
                              "frontier_sector_penalty",
                              "frontier_sector_short", "frontier_sector_long",
                              "frontier_closest", "frontier_cluster",
-                             "frontier_cells", "qlearn", "oracle"])
+                             "frontier_cells", "qlearn", "oracle",
+                             "oracle_cluster", "oracle_lookahead"])
     ap.add_argument("--seed", type=int, required=True,
                     help="world seed (must match the running server)")
     ap.add_argument("--episode", type=int, default=0)
@@ -273,7 +279,7 @@ def main():
     # before constructing Env (which uses a fixed distance per episode).
     policy_obj = None
     pre_policy = None
-    if args.policy not in ("oracle", "qlearn"):
+    if args.policy not in ("oracle", "oracle_cluster", "oracle_lookahead", "qlearn"):
         pre_policy = make_policy(args.policy, seed=args.seed)
     elif args.policy == "qlearn":
         from mdp.qlearn import LinearQ
@@ -293,6 +299,14 @@ def main():
         if args.policy == "oracle":
             trail, oracle_expected_biomes = run_oracle_episode(
                 env, args.seed, args.radius, args.budget_s)
+        elif args.policy == "oracle_cluster":
+            trail, oracle_expected_biomes = run_oracle_episode(
+                env, args.seed, args.radius, args.budget_s,
+                plan_fn=oracle_cluster_mod.plan)
+        elif args.policy == "oracle_lookahead":
+            trail, oracle_expected_biomes = run_oracle_episode(
+                env, args.seed, args.radius, args.budget_s,
+                plan_fn=oracle_lookahead_mod.plan)
         elif args.policy == "qlearn":
             policy_obj = pre_policy
             trail, termination = run_policy_episode(env, pre_policy, args.budget_s)
