@@ -163,6 +163,7 @@ bot/                   Node: mineflayer bridge + spawner
 tools/                 Utility scripts; tools/cubiomes/ vendored, gitignored
   extract_biomes.py    Materializer: cubiomes → data/biomes_<seed>.npz
   smoke_locomotion.py  Interactive smoke test (not pytest)
+  drive_demo.py        Drive a bridge bot through compass hops (viewer demo)
 tests/                 pytest
 mc-server/             PaperMC install; world data gitignored
 eval.py                One-episode orchestrator
@@ -223,3 +224,44 @@ GOAL_TOLERANCE=8 HOP_DISTANCE=50 \
 | `STUCK_ESCAPE_STREAK`   | 1       | Stuck count before forcing random action (999 = disabled) |
 | `SEED_INSTANCES`        | 1       | Number of duplicate-seed servers per seed                 |
 | `SEEDS`                 | 123,456,789 | Comma-separated test seeds for the driver             |
+| `VIEWER`                | 0       | `1` = serve a prismarine-viewer 3D web view of the bot     |
+| `VIEWER_BASE_PORT`      | 3000    | Viewer HTTP port is `VIEWER_BASE_PORT + bot_id`           |
+| `VIEWER_FIRST_PERSON`   | 0       | `1` = bot's-eye view instead of orbit-follow              |
+
+## Live 3D viewer (for figures / demos)
+
+`prismarine-viewer` renders a headless 3D web view of a bot — no second
+Minecraft client needed. It's opt-in (off in the eval fleet) and draws
+the bot's traversed path as a polyline plus the current pathfinder target
+as a marker, which is what you want for a trajectory figure.
+
+```bash
+# Terminal 1: server (as above)        cd mc-server && java -Xmx6G -Xms2G -jar paper.jar nogui
+# Terminal 2: one viewer-enabled bot
+VIEWER=1 node bot/bridge.js 0          # serves http://localhost:3000, opens bridge on 9000
+# Terminal 3: make it move so the trail is non-trivial — either run an
+# eval against port 9000, or use the standalone driver:
+python3 tools/drive_demo.py 14         # 14 compass hops; pass [n_hops] [port]
+```
+
+Open `http://localhost:3000` after the bot spawns: the orbit camera follows
+the bot, the green polyline is its traversed path, and the red marker is the
+current pathfinder target. A freshly spawned bot just sits at its dispersal
+point until something drives it (eval or `drive_demo.py`), so start the
+driver before recording.
+
+Each bot gets its own port (`3000 + id`), so `VIEWER=1 node bot/spawn.js 5`
+exposes bots 0–4 on ports 3000–3004. Point a screen recorder at the tab
+for a demo clip, or grab stills for the paper. Leave `VIEWER` unset for
+batch eval runs — one WebGL server per bot across 25 bots is a needless
+perf hit.
+
+Note: bots occasionally die mid-run with `entity-position-NaN` (a known
+mineflayer locomotion bug, see `RESULTS.md` §5.3); the viewer stops tracking
+when the underlying bot dies. Just relaunch the bridge.
+
+`prismarine-viewer` pulls in `canvas` (a native module). `npm install`
+fetches a prebuilt binary on most platforms; if a build is triggered on
+Linux you may need `apt install libcairo2-dev libpango1.0-dev libjpeg-dev
+libgif-dev librsvg2-dev` first. The viewer is `require`d lazily, so this
+only matters when `VIEWER=1`.

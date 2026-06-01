@@ -41,6 +41,19 @@ const LAND_TIMEOUT_MS = 20000;  // give the bot at most this long to land after 
 // grid (with the visible() filter) for the line-of-sight setting.
 const WORLD_MODE = process.env.WORLD_MODE || 'complete';
 
+// prismarine-viewer: opt-in 3D web view of this bot for paper figures /
+// demo recordings. OFF by default so the 25-bot eval fleet doesn't each
+// spin up a WebGL server. Enable per-bot with VIEWER=1; the HTTP port is
+// VIEWER_BASE_PORT + ID (so a fleet of viewers don't collide). Set
+// VIEWER_FIRST_PERSON=1 for a bot's-eye view instead of orbit-follow.
+// When live, the bot's traversed path is drawn as a polyline and the
+// current pathfinder target as a marker point.
+const VIEWER = process.env.VIEWER === '1';
+const VIEWER_PORT = parseInt(process.env.VIEWER_BASE_PORT || '3000', 10) + ID;
+const VIEWER_FIRST_PERSON = process.env.VIEWER_FIRST_PERSON === '1';
+// Trajectory polyline accumulated across hops (block coords, surface Y).
+const pathPoints = [];
+
 // Visibility predicate — always-true under complete-knowledge.
 // Swap this out for raycasting / heightmap checks to get line-of-sight.
 function visible(_bx, _bz) { return true; }
@@ -152,6 +165,7 @@ bot.once('spawn', () => {
   }
   bot.pathfinder.setMovements(moves);
   console.log(`bot ${ID} spawned`);
+  if (VIEWER) setupViewer();
   // Disable fall damage so the bot survives the 180-block plunge from
   // Y=250. Idempotent; harmless if a peer bot already set it.
   bot.chat('/gamerule fallDamage false');
@@ -161,7 +175,45 @@ bot.once('spawn', () => {
   bot.chat('/give @s minecraft:cobblestone 256');
   bot.chat('/give @s minecraft:ladder 64');
   tryDisperse(0);
+  // Safety net: the dispersal land-detector keys off `forcedMove` +
+  // `onGround`, both of which are unreliable after a server-side /tp
+  // (mineflayer #1517). If neither fires we'd never open the bridge.
+  // Open it anyway 35 s post-spawn — well under the eval's 90 s settle,
+  // so this only ever helps. Idempotent via the startServer guard.
+  setTimeout(() => {
+    if (!serverStarted) {
+      console.log(`bot ${ID} dispersal-settle fallback; opening bridge anyway`);
+      startServer();
+    }
+  }, 35000);
 });
+
+// Stand up the prismarine-viewer HTTP server and seed the trajectory at
+// the bot's current position. Required lazily so non-viewer runs never
+// load the (heavy) WebGL/three.js dependency tree.
+function setupViewer() {
+  try {
+    const { mineflayer: mineflayerViewer } = require('prismarine-viewer');
+    mineflayerViewer(bot, { port: VIEWER_PORT, firstPerson: VIEWER_FIRST_PERSON });
+    const p = bot.entity.position;
+    pathPoints.push(new Vec3(p.x, p.y, p.z));
+    console.log(`bot ${ID} viewer at http://localhost:${VIEWER_PORT}`);
+  } catch (e) {
+    console.log(`bot ${ID} viewer failed to start: ${e.message}`);
+  }
+}
+
+// Redraw the traversed-path polyline and mark the current target. No-op
+// unless the viewer is live. `target` is an optional [x, y, z] waypoint.
+function drawOverlay(target) {
+  if (!bot.viewer) return;
+  if (pathPoints.length >= 2) {
+    bot.viewer.drawLine('trail', pathPoints, 0x44ff44);
+  }
+  if (target) {
+    bot.viewer.drawPoints('target', [new Vec3(target[0], target[1], target[2])], 0xff2222, 8);
+  }
+}
 
 // Dead-bot tracking — set on any disconnect signal so executeAction can
 // short-circuit instead of letting pathfinder time out on stale state.
@@ -334,6 +386,7 @@ function executeAction({ theta, distance }, cb) {
   // so it doesn't get stuck trying to climb terrain to the exact target.
   const goal = new GoalNearXZ(tx, tz, GOAL_TOLERANCE);
   bot.pathfinder.setGoal(goal, false);
+  drawOverlay([tx, sy, tz]);
 
   // Sample biome every ~1s during the hop so we catch mid-traversal
   // biomes that the start/end snapshot would miss. Pathfinder walks
@@ -358,6 +411,11 @@ function executeAction({ theta, distance }, cb) {
     bot.removeListener('path_update', onStuck);
     bot.pathfinder.setGoal(null);
     const obs = stuck ? { ...getObs(), stuck: true } : getObs();
+    if (bot.viewer && bot.entity && bot.entity.position) {
+      const q = bot.entity.position;
+      pathPoints.push(new Vec3(q.x, q.y, q.z));
+      drawOverlay(null);
+    }
     const moved = Math.hypot(obs.x - sx, obs.z - sz);
     const dt = ((Date.now() - t0) / 1000).toFixed(1);
     // Single-line, grep-able per-move trace in block coordinates.
@@ -381,7 +439,10 @@ function executeAction({ theta, distance }, cb) {
   bot.on('path_update', onStuck);
 }
 
+let serverStarted = false;
 function startServer() {
+  if (serverStarted) return;  // guard: dispersal callback + fallback both call this
+  serverStarted = true;
   const server = net.createServer((conn) => {
     console.log(`bot ${ID} agent connected`);
     let buf = '';

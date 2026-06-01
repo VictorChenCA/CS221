@@ -3,9 +3,11 @@
   "version": "0.0.1",
   "private": true,
   "dependencies": {
+    "canvas": "^3.2.3",
+    "minecraft-data": "^3.83.0",
     "mineflayer": "^4.20.0",
     "mineflayer-pathfinder": "^2.4.5",
-    "minecraft-data": "^3.83.0",
+    "prismarine-viewer": "^1.33.0",
     "vec3": "^0.1.10"
   }
 }
