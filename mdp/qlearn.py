@@ -10,11 +10,21 @@ mdp/features.py. With 8 actions and PHI_DIM = 17, the model has
 budget.
 """
 
+import os
 import numpy as np
 from pathlib import Path
 
 from mdp.env import NUM_ACTIONS
-from mdp.features import PHI_DIM, featurize
+from mdp.features import PHI_DIM, featurize, novelty_potential
+
+# Potential-based shaping weight (Ng/Harada/Russell 1999). 0 disables it.
+# F(s,a,s') = β·(γ·Φ(s') − Φ(s)) with Φ = closeness to nearest novel biome,
+# so the agent gets a dense per-step gradient toward novelty instead of
+# only the sparse +1 on entering a new biome. Policy-invariant in the
+# limit; with linear FA + little data it mainly speeds directed
+# exploration. γ matches the learner's discount.
+SHAPE_BETA = float(os.environ.get("SHAPE_BETA", "0.5"))
+SHAPE_GAMMA = float(os.environ.get("SHAPE_GAMMA", "0.95"))
 
 
 class LinearQ:
@@ -100,4 +110,8 @@ def compute_reward(prev_obs: dict, obs: dict) -> float:
         # was stuck, now isn't — reward for escaping
         r += 0.20
     r -= 0.005
+    # Potential-based shaping toward novelty (dense exploration gradient).
+    if SHAPE_BETA:
+        r += SHAPE_BETA * (SHAPE_GAMMA * novelty_potential(obs)
+                           - novelty_potential(prev_obs))
     return r

@@ -46,7 +46,7 @@ sys.path.insert(0, str(ROOT))
 from mdp.env import Env
 from mdp.world import NpzWorldView
 from mdp.qlearn import LinearQ, compute_reward
-from mdp.features import featurize
+from mdp.features import featurize, init_stuck_trace, update_stuck_trace
 
 # ------- config -------------------------------------------------------------
 
@@ -198,31 +198,64 @@ def run_episode_thread(env: Env, agent: LinearQ, budget_s: float,
     try:
         prev = env.observe()
         prev["was_stuck"] = False
+        trace = init_stuck_trace()
+        prev["stuck_dirs"] = trace
         t0 = time.monotonic()
         n_steps = 0; n_stuck = 0; total_r = 0.0
         biomes_at_start = int(prev.get("numVisited", 0))
-        # Stuck-streak escape during training too (mirrors eval). Prevents
-        # the 5000-step stuck-spam disasters we saw in v31/v33/v37 where
-        # a single bot wedged against a wall fired ~6000 stuck actions in
-        # 300s, generating thousands of bad gradient samples that
-        # dominated the round.
+        # Forced-escape threshold. Historically this was hardcoded to 1
+        # (force a random action after a single stuck), but that crutch
+        # acts FOR the policy on every stuck step, so the policy never
+        # experiences its own consecutive stuck actions and can't learn to
+        # escape. Default is now 999 (off) so training is rigorous: the
+        # policy must learn directional avoidance via the stuck_dirs
+        # feature. A high safety valve can still be set via the env var.
+        # Stuck-spam is bounded by the distance-proportional action timeout
+        # (~33s/50-block hop), so a wedged bot fires ~9 steps in 300s, not
+        # the ~6000 we saw before the iter-9 timeout fix.
         import random as _random
+        import math as _math
+        STUCK_ESCAPE_STREAK = int(os.environ.get("STUCK_ESCAPE_STREAK", "999"))
+        # Count-based exploration bonus (Bellemare 2016 / Tang 2017): a
+        # +BETA_COUNT/sqrt(N(cell)) intrinsic reward on the discretized
+        # position cell drives *directed* spatial coverage (the proposal's
+        # planned alternative to undirected eps-greedy). Training-only —
+        # eval just runs the learned policy. Default 0 (off).
+        BETA_COUNT = float(os.environ.get("BETA_COUNT", "0"))
+        COUNT_CELL = int(os.environ.get("COUNT_CELL", "50"))  # blocks/cell
+        visit_counts: dict = {}
         escape_rng = _random.Random(seed)
         stuck_streak = 0
         while time.monotonic() - t0 < budget_s:
             prev["was_stuck"] = bool(stuck_streak > 0)
-            if stuck_streak >= 1:
+            prev["stuck_dirs"] = trace
+            if stuck_streak >= STUCK_ESCAPE_STREAK:
                 a = escape_rng.randrange(8)
                 stuck_streak = 0
             else:
                 a = agent.act(prev)
             obs = env.step(a)
-            obs["was_stuck"] = bool(obs.get("stuck"))
+            # A NaN-killed / kicked bot returns {stuck:true, dead:true}
+            # *instantly* (no pathfinder wait), so without this break the
+            # loop fires thousands of degenerate gradient updates into the
+            # shared W in the remaining budget (one dead bot produced a
+            # ~14000-stuck round in iter 2). End the episode on death, as
+            # eval.py already does.
+            if obs.get("dead"):
+                break
+            stuck_now = bool(obs.get("stuck"))
+            obs["was_stuck"] = stuck_now
+            trace = update_stuck_trace(trace, a, stuck_now)
+            obs["stuck_dirs"] = trace
             r = compute_reward(prev, obs)
+            if BETA_COUNT and obs.get("x") is not None:
+                cell = (obs["x"] // COUNT_CELL, obs["z"] // COUNT_CELL)
+                visit_counts[cell] = visit_counts.get(cell, 0) + 1
+                r += BETA_COUNT / _math.sqrt(visit_counts[cell])
             locked_update(agent, prev, a, r, obs)
             total_r += r
             n_steps += 1
-            if obs.get("stuck"):
+            if stuck_now:
                 n_stuck += 1
                 stuck_streak += 1
             else:

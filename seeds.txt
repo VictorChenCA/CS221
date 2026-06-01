@@ -1,16 +1,22 @@
 # train
-1111
-2222
-3333
-4444
-5555
-6666
-7777
-8888
-9999
-1010
+# 10 land-rich seeds (aquatic <=13% at the 250-block dispersal radius,
+# 12-18 distinct biomes). Screened from round-number candidates; ocean
+# traps (8000/12000/15000/18000) dropped so bots don't drown in place.
+2000
+3000
+4000
+5000
+6000
+9000
+10000
+14000
+17000
+19000
 
 # test
-123
-456
-789
+# final eval set (RESULTS.md); disjoint from train. random baseline = 3.44.
+11111
+22222
+33333
+44444
+55555

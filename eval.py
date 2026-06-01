@@ -35,6 +35,7 @@ from mdp.baselines import (
     FrontierUnvisitedCells,
 )
 from mdp.world import NpzWorldView
+from mdp.features import init_stuck_trace, update_stuck_trace
 import mdp.oracle_cluster as oracle_cluster_mod
 import mdp.oracle_lookahead as oracle_lookahead_mod
 
@@ -102,10 +103,13 @@ def run_policy_episode(env: Env, policy, budget_s: float) -> tuple[list[dict], d
     escape_rng = _random.Random()
     stuck_streak = 0
     n_escapes = 0
+    trace = init_stuck_trace()
     while time.monotonic() - t0 < budget_s:
-        # Annotate the obs the policy will see with was_stuck so qlearn's
-        # featurizer can react to the stuck signal.
+        # Annotate the obs the policy will see with was_stuck + the
+        # per-direction stuck memory so qlearn's featurizer can route
+        # around recently-failed directions on its own.
         trail[-1]["was_stuck"] = bool(stuck_streak > 0)
+        trail[-1]["stuck_dirs"] = trace
         if stuck_streak >= STUCK_ESCAPE_STREAK:
             action = escape_rng.randrange(8)
             n_escapes += 1
@@ -113,8 +117,11 @@ def run_policy_episode(env: Env, policy, budget_s: float) -> tuple[list[dict], d
         else:
             action = policy.act(trail[-1])
         obs = env.step(action)
+        stuck_now = bool(obs.get("stuck"))
+        trace = update_stuck_trace(trace, action, stuck_now)
+        obs["stuck_dirs"] = trace
         trail.append(obs)
-        if obs.get("stuck"):
+        if stuck_now:
             stuck_streak += 1
         else:
             stuck_streak = 0
