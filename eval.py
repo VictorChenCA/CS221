@@ -348,6 +348,8 @@ def main():
         **metrics,
         **termination,
         "policy_stats": policy_stats,
+        # Per-step (x,z) path for trajectory plots (top-down maps).
+        "trail_xz": [[o.get("x"), o.get("z")] for o in trail],
     }, indent=2))
     print(json.dumps(metrics, indent=2))
 
