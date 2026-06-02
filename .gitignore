@@ -17,6 +17,10 @@ runs/
 scratch/
 
 # minecraft server runtime
+# paper.jar is a third-party binary — download separately (see README)
+mc-server/paper.jar
+# Paper writes version_history.json at runtime
+mc-server/version_history.json
 mc-server/world*/
 mc-server/logs/
 mc-server/cache/
@@ -40,3 +44,12 @@ weights/qlearn_*.npz
 /cache/
 /libraries/
 /versions/
+
+# Local-only: paper write-up sources and private dev log (kept off the public repo)
+*.pdf
+*.zip
+overleaf/
+slides/
+rl_reward_report/
+final.tex
+RL_ROADMAP.md

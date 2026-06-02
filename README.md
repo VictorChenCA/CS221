@@ -37,10 +37,20 @@ brew install --cask temurin              # macOS; or Adoptium Temurin 21 on Wind
 java -version                            # expect 21.x
 ```
 
-`mc-server/` ships pre-configured (paper.jar, eula.txt, server.properties,
-all Paper YAMLs). The only field you change per experiment is
-`level-seed=<N>` in `mc-server/server.properties` — Paper reads it once at
-world creation, so changing it requires a server restart.
+`mc-server/` ships pre-configured (eula.txt, server.properties, all Paper
+YAMLs) except for the server binary itself, which is a third-party download
+not redistributed here:
+
+```bash
+# PaperMC 1.20.1, build 196 (the version this project was developed against)
+curl -o mc-server/paper.jar \
+  https://api.papermc.io/v2/projects/paper/versions/1.20.1/builds/196/downloads/paper-1.20.1-196.jar
+```
+
+Any recent 1.20.1 Paper build works; pin build 196 to match the original
+runs exactly. The only field you change per experiment is `level-seed=<N>`
+in `mc-server/server.properties` — Paper reads it once at world creation, so
+changing it requires a server restart.
 
 ### 2. Node deps
 
@@ -155,10 +165,12 @@ mdp/                   Python: env, world view, biome generator, policies
   env.py               TCP client to a bot bridge, action space, view overlay
   world.py             NpzWorldView (slices data/biomes_<seed>.npz)
   biomegen.py          cubiomes_gen(seed) → (cell_x, cell_z) → biome_id
-  baselines.py         RandomPolicy, FrontierPolicy
-  features.py          (TODO §C — linear-Q feature extractor)
-  qlearn.py            (TODO §C — Q-learning + count-based bonus)
+  baselines.py         RandomPolicy, FrontierPolicy (sector-vote variants)
+  features.py          Linear-Q feature extractor (φ ∈ ℝ²⁷)
+  qlearn.py            Q-learning + potential-based shaping + count bonus
   oracle.py            Offline greedy orienteering planner
+  oracle_cluster.py    Cluster-then-route planner variant
+  oracle_lookahead.py  Lookahead planner variant
 bot/                   Node: mineflayer bridge + spawner
 tools/                 Utility scripts; tools/cubiomes/ vendored, gitignored
   extract_biomes.py    Materializer: cubiomes → data/biomes_<seed>.npz
@@ -265,3 +277,25 @@ fetches a prebuilt binary on most platforms; if a build is triggered on
 Linux you may need `apt install libcairo2-dev libpango1.0-dev libjpeg-dev
 libgif-dev librsvg2-dev` first. The viewer is `require`d lazily, so this
 only matters when `VIEWER=1`.
+
+## Acknowledgements
+
+This project stands on several open-source tools, none of which are
+redistributed here — install them as described above:
+
+- [PaperMC](https://papermc.io/) — the Minecraft server (`paper.jar`)
+- [mineflayer](https://github.com/PrismarineJS/mineflayer) and
+  [mineflayer-pathfinder](https://github.com/PrismarineJS/mineflayer-pathfinder)
+  — bot control and block-level locomotion
+- [cubiomes](https://github.com/Cubitect/cubiomes) — offline biome
+  generation from a world seed
+- [prismarine-viewer](https://github.com/PrismarineJS/prismarine-viewer)
+  — the optional 3D web view
+
+Developed as a CS221 (Artificial Intelligence) final project at Stanford.
+
+## License
+
+Released under the [MIT License](LICENSE). Note that the third-party tools
+listed above carry their own licenses, and Minecraft itself is proprietary
+to Mojang/Microsoft — this repository contains none of their code or assets.
