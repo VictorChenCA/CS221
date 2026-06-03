@@ -6,6 +6,8 @@ Train a Minecraft agent to visit as many distinct biomes as possible in a
 10-minute time budget. Linear-Q RL against a random walk and a frontier
 baseline, with an offline max-coverage oracle as the upper bound.
 
+[FINAL REPORT]: (https://drive.google.com/file/d/1rc6PvQD06-lw_1k0xhPSlE6AVGlNX8oU/view?usp=sharing)
+
 ## World model
 ![MDP](Images/MDP.png)
 
