@@ -248,7 +248,7 @@ GOAL_TOLERANCE=8 HOP_DISTANCE=50 \
 
 ## Live 3D viewer (for figures / demos)
 
-![Result](MineViewer2.png)
+![MineViewer2](Images/MineViewer2.png)
 
 `prismarine-viewer` renders a headless 3D web view of a bot — no second
 Minecraft client needed. It's opt-in (off in the eval fleet) and draws
