@@ -1,5 +1,7 @@
 # CS221: Biome Coverage in Minecraft
 
+![SteveForest](Images/SteveForest.png)
+
 Train a Minecraft agent to visit as many distinct biomes as possible in a
 10-minute time budget. Linear-Q RL against a random walk and a frontier
 baseline, with an offline max-coverage oracle as the upper bound.
@@ -68,6 +70,7 @@ pip install -r requirements.txt          # numpy, pytest
 ```
 
 ### 4. Cubiomes (vendored)
+![Cubiomes](Images/Cubiomes.png)
 
 The offline biome generator is the upstream `cubiomes` C library, built
 locally and loaded via ctypes.
@@ -98,6 +101,7 @@ python3 tools/extract_biomes.py --seed 1111
 ```
 
 ## Running an episode
+![Trinity](Images/Trinity.png)
 
 Three terminals.
 
@@ -128,6 +132,8 @@ python3 eval.py --policy oracle   --seed 1111 --episode 2 --radius 64
 ```
 
 ### Full test-eval (45 episodes, ~30 min, cross-platform)
+
+![MineViewer](Images/MineViewer.png)
 
 ```bash
 for s in 123 456 789; do python3 tools/extract_biomes.py --seed $s; done
@@ -241,6 +247,8 @@ GOAL_TOLERANCE=8 HOP_DISTANCE=50 \
 | `VIEWER_FIRST_PERSON`   | 0       | `1` = bot's-eye view instead of orbit-follow              |
 
 ## Live 3D viewer (for figures / demos)
+
+![MineViewer2](Images/MineViewer2.png)
 
 `prismarine-viewer` renders a headless 3D web view of a bot — no second
 Minecraft client needed. It's opt-in (off in the eval fleet) and draws
