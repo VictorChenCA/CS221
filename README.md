@@ -7,6 +7,7 @@ Train a Minecraft agent to visit as many distinct biomes as possible in a
 baseline, with an offline max-coverage oracle as the upper bound.
 
 ## World model
+![MDP](Images/MDP.png)
 
 The MDP discretizes the world into a 2D grid where **each cell is a 4×4
 block square** — the unit Minecraft 1.18+ uses to store biomes natively.
